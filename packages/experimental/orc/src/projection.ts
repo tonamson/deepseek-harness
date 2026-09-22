@@ -782,7 +782,8 @@ function requestReport(
       return refuse(state, `${label} request task does not match the active task`)
     }
     if (data.iteration !== task.iteration) return refuse(state, `${label} request iteration does not match the task`)
-    if (findReport(state, kind, data.scope, data.iteration, taskId) !== undefined) {
+    const existing = findReport(state, kind, data.scope, data.iteration, taskId)
+    if (existing !== undefined && (existing.status === 'open' || existing.status === 'ok')) {
       return refuse(state, `${label} is already requested`)
     }
   }
@@ -1252,7 +1253,7 @@ function latestDelegation(state: OrcState, kind: OrcDelegationKind, scope?: 'wor
   return found
 }
 
-/** Exact review or audit slot for one scope, iteration, and optional task. */
+/** Last review or audit row for one scope, iteration, and optional task. */
 function findReport(
   state: OrcState,
   kind: 'codex-review' | 'codex-audit',
@@ -1260,10 +1261,16 @@ function findReport(
   iteration: number,
   taskId: OrcTaskId | undefined,
 ): OrcDelegation | undefined {
-  return state.delegations.find(item => item.kind === kind
-    && item.scope === scope
-    && item.iteration === iteration
-    && (taskId === undefined ? item.taskId === undefined : item.taskId === taskId))
+  let found: OrcDelegation | undefined
+  for (const item of state.delegations) {
+    if (item.kind === kind
+      && item.scope === scope
+      && item.iteration === iteration
+      && (taskId === undefined ? item.taskId === undefined : item.taskId === taskId)) {
+      found = item
+    }
+  }
+  return found
 }
 
 /** Highest settled review or audit iteration for one task. */

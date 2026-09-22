@@ -419,6 +419,7 @@ describe('ORC delegated results', () => {
         'repositoryScope: /repo/orc',
         'skillWorkflow: superpowers workflow',
         'expectedStructuredResult: spec-schema',
+        'jsonContract: {"stage":"codex-spec","spec":"<non-empty string>"}',
         'severityPolicy: critical, high, and medium block; low and info do not unless blockingSeverities includes them',
         'blockingSeverities: critical, high, medium',
         'readOnly: true',

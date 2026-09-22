@@ -129,6 +129,32 @@ export function parseCodexAudit(text: string | undefined): OrcCodexReportSuccess
 }
 
 /**
+ * JSON object the stage parser accepts.
+ * Review and audit each name their own source stage. This text is for the child prompt, not a provider `outputSchema`.
+ * @param stage - spec, plan, review, or audit.
+ * @returns one line with the required JSON object and, for a report, the finding fields.
+ */
+export function codexJsonContract(stage: OrcCodexStage): string {
+  switch (stage) {
+    case 'codex-spec':
+      return '{"stage":"codex-spec","spec":"<non-empty string>"}'
+    case 'codex-plan':
+      return '{"stage":"codex-plan","plan":"<non-empty string>"}'
+    case 'codex-review':
+      return `{"stage":"codex-review","findings":[]} finding:${findingContract('codex-review')}`
+    case 'codex-audit':
+      return `{"stage":"codex-audit","findings":[]} finding:${findingContract('codex-audit')}`
+    default:
+      return assertNever(stage)
+  }
+}
+
+/** Finding fields for one report stage. `sourceStage` is not shared with the other report. */
+function findingContract(stage: 'codex-review' | 'codex-audit'): string {
+  return `{"id":"<non-empty>","severity":"critical|high|medium|low|info","file":"<non-empty>","location":"<non-empty>","evidence":"<non-empty>","remediation":"<non-empty>","status":"open","summary":"<non-empty>","sourceStage":"${stage}","taskId":"<non-empty>"}`
+}
+
+/**
  * Parse final text for the stage that produced it.
  * @param stage - spec, plan, review, or audit. Review and audit do not share a schema.
  * @param text - final Codex text, or undefined when the run produced none.

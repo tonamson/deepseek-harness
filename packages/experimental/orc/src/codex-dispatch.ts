@@ -120,7 +120,7 @@ export async function runCodexTaskLoop(
   const state = service.state(caller)
   if (state.phase === 'task_peer_settlement') {
     await service.advance(caller, 'task_review')
-  } else if (state.phase !== 'task_review') {
+  } else if (state.phase !== 'task_review' && state.phase !== 'task_audit') {
     throw new Error(SETTLED_TASK)
   }
   return enforceTaskGates(service, caller, signal, fix)
@@ -146,19 +146,22 @@ export async function runCodexFinalLoop(
     throw new Error(CLEAN_TASKS)
   }
   for (;;) {
-    const reviewed = await openGate(service, caller, signal, 'codex-review', { scope: 'branch' })
-    const review = reportOf(reviewed, 'codex-review', 'branch', undefined)
-    if (review?.status !== 'ok') return reviewed
-    const audited = await openGate(service, caller, signal, 'codex-audit', { scope: 'branch' })
-    const audit = reportOf(audited, 'codex-audit', 'branch', undefined)
-    if (audit?.status !== 'ok') return audited
-    if (!review.blocksProgress && !audit.blocksProgress) return audited
-    const taskId = blockingFindings(audited, [review, audit]).find(finding => finding.taskId !== undefined)?.taskId
-    if (taskId === undefined) return audited
-    const repaired = await repairTask(service, caller, fix, taskId, [review, audit])
-    if (repaired !== undefined) return repaired
-    const gated = await enforceTaskGates(service, caller, signal, fix)
-    if (gated.phase !== 'final_review') return gated
+    if (service.state(caller).phase !== 'final_review') return service.state(caller)
+    const reviewed = await ensureReport(service, caller, signal, 'codex-review', { scope: 'branch' })
+    if (reviewed.report?.status !== 'ok') return reviewed.state
+    const audited = await ensureReport(service, caller, signal, 'codex-audit', { scope: 'branch' })
+    if (audited.report?.status !== 'ok') return audited.state
+    const review = reviewed.report
+    const audit = audited.report
+    if (!review.blocksProgress && !audit.blocksProgress) return audited.state
+    const taskIds = distinctBlockingTaskIds(audited.state, [review, audit])
+    if (taskIds.length === 0) return audited.state
+    for (const taskId of taskIds) {
+      const repaired = await repairTask(service, caller, fix, taskId, [review, audit])
+      if (repaired !== undefined) return repaired
+      const gated = await enforceTaskGates(service, caller, signal, fix)
+      if (gated.phase !== 'final_review') return gated
+    }
   }
 }
 
@@ -169,14 +172,14 @@ interface ParsedRecord {
   readonly findings?: readonly OrcFindingInput[]
 }
 
-/** Record a parsed result. A refused `ok` record is stored as malformed instead of left open. */
+/** Record a parsed result. A duplicate finding id stays open and keeps the projection error. */
 async function recordParsed(service: OrcService, caller: Agent, input: OrcCodexSettlement, recorded: ParsedRecord): Promise<OrcState> {
   try {
     return await writeResult(service, caller, input, recorded)
   } catch (error: unknown) {
     const current = service.state(caller)
     if (delegationStatus(current, input.correlationId) !== 'open') return current
-    if (recorded.status !== 'ok') throw error
+    if (recorded.status !== 'ok' || isDuplicateFindingRefusal(error)) throw error
     try {
       return await writeResult(service, caller, input, { status: 'malformed', ...rawField(recorded.rawText) })
     } catch (fallback: unknown) {
@@ -185,6 +188,11 @@ async function recordParsed(service: OrcService, caller: Agent, input: OrcCodexS
       throw fallback
     }
   }
+}
+
+/** The fold rejected an id that is already on the run. That is not a malformed Codex document. */
+function isDuplicateFindingRefusal(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('duplicate finding id')
 }
 
 /** Append one Codex result through the service. */
@@ -206,20 +214,24 @@ async function enforceTaskGates(service: OrcService, caller: Agent, signal: Abor
   for (;;) {
     const state = service.state(caller)
     const taskId = state.activeTaskId
-    if (taskId === undefined || state.phase !== 'task_review') throw new Error(SETTLED_TASK)
-    const reviewed = await openGate(service, caller, signal, 'codex-review', { scope: 'task', taskId })
-    const review = reportOf(reviewed, 'codex-review', 'task', taskId)
-    if (review?.status !== 'ok') return reviewed
-    await service.advance(caller, 'task_audit')
-    const audited = await openGate(service, caller, signal, 'codex-audit', { scope: 'task', taskId })
-    const audit = reportOf(audited, 'codex-audit', 'task', taskId)
-    if (audit?.status !== 'ok') return audited
+    if (taskId === undefined || (state.phase !== 'task_review' && state.phase !== 'task_audit')) throw new Error(SETTLED_TASK)
+    if (state.phase === 'task_review') {
+      const reviewed = await ensureReport(service, caller, signal, 'codex-review', { scope: 'task', taskId })
+      if (reviewed.report?.status !== 'ok') return reviewed.state
+      await service.advance(caller, 'task_audit')
+    }
+    const current = service.state(caller)
+    const review = reportOf(current, 'codex-review', 'task', taskId)
+    if (review?.status !== 'ok') return current
+    const audited = await ensureReport(service, caller, signal, 'codex-audit', { scope: 'task', taskId })
+    if (audited.report?.status !== 'ok') return audited.state
+    const audit = audited.report
     if (review.blocksProgress || audit.blocksProgress) {
       const repaired = await repairTask(service, caller, fix, taskId, [review, audit])
       if (repaired !== undefined) return repaired
       continue
     }
-    const remaining = audited.tasks.some(task => task.id !== taskId && task.phase !== 'clean')
+    const remaining = audited.state.tasks.some(task => task.id !== taskId && task.phase !== 'clean')
     return remaining ? service.advance(caller, 'next_task') : service.advance(caller, 'final_review')
   }
 }
@@ -238,7 +250,7 @@ async function repairTask(
   if (before.phase !== 'task_fix') {
     await service.advance(caller, 'task_fix', before.phase === 'final_review' ? taskId : undefined)
   }
-  const findings = blockingFindings(service.state(caller), reports)
+  const findings = blockingFindings(service.state(caller), reports).filter(finding => finding.taskId === taskId)
   let work: OrcFixWorkResult
   try {
     work = await fix({ taskId, iteration: task.iteration + 1, findings })
@@ -249,6 +261,24 @@ async function repairTask(
   await service.recordFix(caller, { taskId, iteration: task.iteration + 1, decision: work.decision })
   await service.advance(caller, 'task_review')
   return undefined
+}
+
+/**
+ * Use the current ok report, or start one when it is missing or not ok.
+ * An ok review is not requested again. A non-ok audit is returned by the caller of this helper.
+ */
+async function ensureReport(
+  service: OrcService,
+  caller: Agent,
+  signal: AbortSignal,
+  kind: 'codex-review' | 'codex-audit',
+  input: { readonly scope: OrcReviewScope; readonly taskId?: OrcTaskId },
+): Promise<{ readonly state: OrcState; readonly report: OrcDelegation | undefined }> {
+  const current = service.state(caller)
+  const existing = reportOf(current, kind, input.scope, input.taskId)
+  if (existing?.status === 'ok') return { state: current, report: existing }
+  const state = await openGate(service, caller, signal, kind, input)
+  return { state, report: reportOf(state, kind, input.scope, input.taskId) }
 }
 
 /** Start one review or audit and wait for its own result. */
@@ -275,10 +305,20 @@ function reportOf(
 ): OrcDelegation | undefined {
   const task = taskId === undefined ? undefined : state.tasks.find(item => item.id === taskId)
   const iteration = scope === 'branch' ? state.branchVisit : task?.iteration
-  return state.delegations.find(item => item.kind === kind
-    && item.scope === scope
-    && item.iteration === iteration
-    && item.taskId === taskId)
+  let found: OrcDelegation | undefined
+  for (const item of state.delegations) {
+    if (item.kind === kind && item.scope === scope && item.iteration === iteration && item.taskId === taskId) found = item
+  }
+  return found
+}
+
+/** Task ids of blocking findings on this pair, in report order, once each. */
+function distinctBlockingTaskIds(state: OrcState, reports: readonly OrcDelegation[]): OrcTaskId[] {
+  const ids: OrcTaskId[] = []
+  for (const finding of blockingFindings(state, reports)) {
+    if (finding.taskId !== undefined && !ids.includes(finding.taskId)) ids.push(finding.taskId)
+  }
+  return ids
 }
 
 /** Findings on these reports whose severity is in the run's blocking set. */

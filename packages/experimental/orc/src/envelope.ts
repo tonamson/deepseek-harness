@@ -1,7 +1,10 @@
 /**
  * Native Codex task text.
  * Every field is copied from a logged envelope or from the run's blocking severities.
+ * The stage JSON contract is prompt text. It is not a provider outputSchema.
  */
+
+import { codexJsonContract } from './codex-results.ts'
 
 /** Inputs for {@link renderCodexEnvelope}. Provider, model, and effort are caller-supplied. */
 export interface OrcCodexEnvelopeText {
@@ -33,6 +36,7 @@ export function renderCodexEnvelope(fields: OrcCodexEnvelopeText): string {
     `repositoryScope: ${fields.repositoryScope}`,
     `skillWorkflow: ${fields.skillWorkflow}`,
     `expectedStructuredResult: ${fields.expectedStructuredResult}`,
+    `jsonContract: ${codexJsonContract(fields.stage)}`,
     'severityPolicy: critical, high, and medium block; low and info do not unless blockingSeverities includes them',
     `blockingSeverities: ${fields.blockingSeverities.join(', ')}`,
     'readOnly: true',

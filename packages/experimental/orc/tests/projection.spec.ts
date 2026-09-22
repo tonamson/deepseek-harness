@@ -718,6 +718,33 @@ describe('ORC transition gates', () => {
     ])).toMatch(/branch review result is malformed and blocks progression/)
   })
 
+  it('replaces a non-ok task report and judges the latest row', () => {
+    const reviewed = [
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'malformed'),
+    ]
+    const replaced = replay([
+      ...reviewed,
+      reportRequested('review', 'corr-review-a2', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a2', 'ok'),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'malformed'),
+      reportRequested('audit', 'corr-audit-a2', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a2', 'ok'),
+      phase('final_review'),
+    ])
+    expect(replaced.phase).toBe('final_review')
+    expect(replaced.delegations.filter(item => item.kind === 'codex-review').at(-1)?.status).toBe('ok')
+    expect(failure([
+      ...reviewed,
+      reportRequested('review', 'corr-review-a2', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a2', 'ok'),
+      reportRequested('review', 'corr-review-a3', 'task', 0, TASK_A),
+    ])).toMatch(/review is already requested/)
+  })
+
   it('does not let a same-visit clean branch pair erase a blocking pair', () => {
     const blocking = [
       ...throughTaskReview(BLOCKING, false),
