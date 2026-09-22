@@ -1488,6 +1488,12 @@ export interface PiAiCompatProfile {
   allowEmptySignature?: boolean
   /** Whether the endpoint accepts Anthropic strict tool schemas; `anthropic-messages`. */
   supportsStrictTools?: boolean
+  /**
+   * Whether the exact model accepts a system message after the conversation has
+   * started; `false` folds later system messages into the leading one.
+   * `mistral-conversations`.
+   */
+  supportsMidConvoSystemMessages?: boolean
 }
 
 /** One request modality a pi-ai model may accept. */
@@ -2775,6 +2781,8 @@ export interface Config {
   providerName?: string
   /** Native Codex model fixed for this instance; omitted to inherit Codex settings. */
   model?: string
+  /** Native Codex reasoning effort fixed for this instance; omitted to inherit Codex settings. */
+  reasoningEffort?: string
   /**
    * Explicit environment entries layered over the subprocess seam's
    * credential-scrubbed parent environment.

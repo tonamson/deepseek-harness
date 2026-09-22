@@ -20,6 +20,7 @@ import type {
   BedrockCompat,
   ChatTemplateKwargValue,
   KnownApi,
+  MistralConversationsCompat,
   Model,
   ModelCost,
   ModelThinkingLevel,
@@ -252,14 +253,16 @@ const COMPLETIONS_COMPAT_GATE = {
   vercelGatewayRouting: 'withhold',
   zaiToolStream: 'withhold',
   supportsOpenAIGrammarTools: 'withhold',
+  supportsMidConvoSystemMessages: 'withhold',
+  supportsMidConvoToolAdditions: 'withhold',
   sendSessionAffinityHeaders: 'withhold',
-  deferredToolsMode: 'withhold',
   sessionAffinityFormat: 'withhold',
 } as const satisfies Record<keyof OpenAICompletionsCompat, CompatDisposition>
 
 /** Disposition of every `OpenAIResponsesCompat` field; a drift gate like the one above. */
 const RESPONSES_COMPAT_GATE = {
   supportsDeveloperRole: 'offer',
+  supportsMidConvoSystemMessages: 'withhold',
   supportsMaxOutputTokens: 'offer',
   supportsStrictMode: 'offer',
   supportsLongCacheRetention: 'offer',
@@ -280,10 +283,25 @@ const ANTHROPIC_COMPAT_GATE = {
   allowEmptySignature: 'offer',
   supportsStrictTools: 'offer',
   sendSessionAffinityHeaders: 'withhold',
-  supportsToolReferences: 'withhold',
+  sessionAffinityFormat: 'withhold',
   supportsMidConvoEffort: 'withhold',
+  supportsMidConvoSystemMessages: 'withhold',
+  supportsMidConvoToolChanges: 'withhold',
   allowedFallbackModels: 'withhold',
 } as const satisfies Record<keyof AnthropicMessagesCompat, CompatDisposition>
+
+/**
+ * Disposition of every `MistralConversationsCompat` field; a drift gate like
+ * the one above. `offer` rather than `withhold`: pi-ai's generated Mistral
+ * catalog carries no `compat` on any of its entries, so nothing else can state
+ * whether a deployment's endpoint accepts a system message mid-conversation,
+ * and `resolveTranscript` reads the switch on every `mistral-conversations`
+ * request. Mistral's own API documents the restriction per model, not per
+ * provider, so only the deployment can answer it.
+ */
+const MISTRAL_CONVERSATIONS_COMPAT_GATE = {
+  supportsMidConvoSystemMessages: 'offer',
+} as const satisfies Record<keyof MistralConversationsCompat, CompatDisposition>
 
 /** Disposition of every `BedrockCompat` field; a drift gate like the one above. */
 const BEDROCK_COMPAT_GATE = {
@@ -315,6 +333,7 @@ const COMPAT_GATES: Readonly<Record<ApiWithCompat, Readonly<Record<string, Compa
   'openai-codex-responses': RESPONSES_COMPAT_GATE,
   'anthropic-messages': ANTHROPIC_COMPAT_GATE,
   'bedrock-converse-stream': BEDROCK_COMPAT_GATE,
+  'mistral-conversations': MISTRAL_CONVERSATIONS_COMPAT_GATE,
 }
 
 /**
@@ -337,6 +356,7 @@ type OfferedCompatField =
   | OfferedIn<typeof RESPONSES_COMPAT_GATE>
   | OfferedIn<typeof ANTHROPIC_COMPAT_GATE>
   | OfferedIn<typeof BEDROCK_COMPAT_GATE>
+  | OfferedIn<typeof MISTRAL_CONVERSATIONS_COMPAT_GATE>
 
 /**
  * pi-ai wire-compatibility switches, set on the route (its models' default) or
@@ -428,6 +448,12 @@ export interface PiAiCompatProfile {
   allowEmptySignature?: boolean
   /** Whether the endpoint accepts Anthropic strict tool schemas; `anthropic-messages`. */
   supportsStrictTools?: boolean
+  /**
+   * Whether the exact model accepts a system message after the conversation has
+   * started; `false` folds later system messages into the leading one.
+   * `mistral-conversations`.
+   */
+  supportsMidConvoSystemMessages?: boolean
 }
 
 /** Compile-time constraint that `T` is `never`. */
@@ -451,6 +477,7 @@ type AssertTrue<T extends true> = T
 
 /** Every compat type a gate classifies, merged so one `Pick` reaches all offered fields. */
 type UpstreamCompat = OpenAICompletionsCompat & OpenAIResponsesCompat & AnthropicMessagesCompat & BedrockCompat
+  & MistralConversationsCompat
 
 /**
  * Proof that each documented field carries its upstream type, not a hand-copied
