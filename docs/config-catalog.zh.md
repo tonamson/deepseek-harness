@@ -2869,6 +2869,41 @@ export interface Config {
 
 来源：[`packages/subagent/subagent-fork-in-process/src/index.ts:31`](../packages/subagent/subagent-fork-in-process/src/index.ts)
 
+<a id="deepseek-aidsh-subagent-grok"></a>
+
+## `@deepseek-ai/dsh-subagent-grok`
+
+需要：`subagents` · `subprocess`
+
+```ts config-catalog
+/** Deployment-owned Grok executable, model, permission, and process settings. */
+export interface Config {
+  /** Provider name on `ctx.subagents` (default `grok`). */
+  providerName?: string
+  /** Bare executable or absolute path resolved in the subprocess execution world. */
+  command?: string
+  /** Native Grok model fixed for this provider instance; omitted to inherit Grok settings. */
+  model?: string
+  /** Native Grok reasoning effort fixed for this provider instance; omitted to inherit Grok settings. */
+  reasoningEffort?: string
+  /** Explicit environment layered over the subprocess seam's credential scrub. */
+  env?: Record<string, string>
+  /** Native non-interactive Grok permission mode. */
+  permissionMode?: GrokPermissionMode
+  /** Wall-clock bound for version check and one delegated task. */
+  timeoutMs?: number
+  /** Grace in milliseconds between managed-range termination tiers. */
+  disposeGraceMs?: number
+  /** Maximum final stdout bytes retained for the parent Session. */
+  maxOutputBytes?: number
+}
+
+/** Native Grok permission mode accepted by a provider instance. */
+export type GrokPermissionMode = typeof GROK_PERMISSION_MODES[number]
+```
+
+来源：[`packages/subagent/subagent-grok/src/index.ts:39`](../packages/subagent/subagent-grok/src/index.ts)
+
 <a id="deepseek-aidsh-subagent-spawn-in-process"></a>
 
 ## `@deepseek-ai/dsh-subagent-spawn-in-process`
