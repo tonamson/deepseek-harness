@@ -44,6 +44,7 @@
       13. Audit separately every task that changes security-sensitive behavior, authentication or authorization, validation, file or network handling, concurrency, persistence, or process isolation with subagent_codex_audit. It runs GPT-5.6-Luna at XHigh effort.
       14. After all planned tasks are complete, run one full-branch audit over the combined diff with subagent_codex_audit. Check cross-task interactions, regressions, inconsistent assumptions, missing tests, and scope drift; task-level reviews do not replace this audit.
       15. Resolve all findings from task reviews and the full-branch audit before declaring completion. The final order is: fix findings, run focused checks, run the repository-required green gate, then report completion with only verified results.
+      16. Superpowers phase boundary: run the initial brainstorming skill normally in the main agent to clarify intent, alternatives, scope, and acceptance criteria. Do not call a review, audit, or spec subagent merely because brainstorming was invoked. When brainstorming hands off to writing-plans, an implementation plan, or any explicit plan/spec phase, call subagent_codex_spec with the completed brainstorm as context before implementation. Use its GPT-5.6-Terra High output as the decision-complete plan, then implement with DeepSeek Flash 4.1 high reasoning.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
