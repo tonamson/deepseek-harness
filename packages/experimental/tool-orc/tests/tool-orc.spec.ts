@@ -95,7 +95,7 @@ class FakeSubagents extends Service {
     return {
       id: SessionId(`shot-${this.oneShot.length}`),
       localAgent: undefined,
-      result: Promise.resolve({ output: [{ type: 'text', text: 'child text' }], stopReason: 'completed' }),
+      result: new Promise(() => {}) as SubagentRun['result'],
       dispose: () => Promise.resolve(),
     }
   }

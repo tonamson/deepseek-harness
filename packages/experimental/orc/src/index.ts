@@ -7,8 +7,10 @@ import { ReasoningEffortId, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-subagent'
+import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { z } from 'zod'
+import { settleCodexRun } from './codex-dispatch.ts'
+import type { OrcCodexStage } from './codex-results.ts'
 import { renderCodexEnvelope } from './envelope.ts'
 import {
   applyOrc,
@@ -130,6 +132,8 @@ export interface OrcResultInput {
   readonly taskId?: OrcTaskId
   readonly status?: OrcReportStatus
   readonly text?: string
+  /** Codex final text. Stored for a blocking result as well as a parsed one. */
+  readonly rawText?: string
   readonly findings?: readonly OrcFindingInput[]
   readonly outcome?: OrcNodeOutcome
   readonly evidence?: string
@@ -243,6 +247,7 @@ export class OrcService extends Service {
 
   private readonly config: OrcServiceConfig
   private readonly live = new Map<string, LiveContinuation>()
+  private readonly codexJobs = new Map<string, Promise<OrcState>>()
 
   /**
    * @param ctx - context with agents, sessions, session persistence, projections, and subagents.
@@ -651,6 +656,23 @@ export class OrcService extends Service {
     })
   }
 
+  /**
+   * Wait until the in-process Codex final text for this correlation is recorded.
+   * A new process can see the open row and still have no result promise. This refuses that row instead of recording a clean report.
+   * @param caller - Supervisor that owns the run.
+   * @param correlationId - delegation id returned by the Codex start.
+   * @returns the projected run after the parsed or blocking result is recorded.
+   */
+  async awaitCodex(caller: Agent, correlationId: OrcCorrelationIdentity): Promise<OrcState> {
+    const job = this.codexJobs.get(correlationId)
+    if (job !== undefined) return job
+    const state = this.readState(this.sessionFor(caller))
+    const delegation = state.delegations.find(item => item.correlationId === correlationId)
+    if (delegation !== undefined && delegation.status !== 'open') return state
+    // ponytail: the result promise is process-local. Upgrade when a cold reopen can reattach the Codex run.
+    throw new OrcError('codex result is not observed')
+  }
+
   /** Refuse spec, approval, assignment, review, audit, and Codex results from anyone but the Supervisor. */
   private requireSupervisorCaller(caller: Agent): void {
     if (this.roleOf(caller) !== 'supervisor') throw new OrcError('only the supervisor may perform this operation')
@@ -822,6 +844,7 @@ export class OrcService extends Service {
         parent: caller,
         signal,
       })
+      this.observeRejection(run.result)
       const continuationId = String(run.id)
       const requested: typeof event = event.type === 'orc/spec/requested'
         ? { type: 'orc/spec/requested', data: { ...event.data, continuationId } }
@@ -834,7 +857,11 @@ export class OrcService extends Service {
         })
       }
       this.live.set(correlationId, { kind: 'one-shot', id: continuationId })
-      this.watch(run)
+      this.observeCodex(caller, run.result, {
+        correlationId,
+        stage: event.type === 'orc/spec/requested' ? 'codex-spec' : 'codex-plan',
+        role: event.data.role,
+      })
       return { correlationId, kind: event.type === 'orc/spec/requested' ? 'codex-spec' : 'codex-plan', spawned: true }
     } catch (error: unknown) {
       try {
@@ -910,13 +937,19 @@ export class OrcService extends Service {
         parent: caller,
         signal: input.signal,
       })
+      this.observeRejection(run.result)
       const continuationId = String(run.id)
       const requested: OrcEvent = review
         ? { type: 'orc/review/requested', data: { ...event.data, continuationId } }
         : { type: 'orc/audit/requested', data: { ...event.data, continuationId } }
       await this.commit(session, requested)
       this.live.set(correlationId, { kind: 'one-shot', id: continuationId })
-      this.watch(run)
+      this.observeCodex(caller, run.result, {
+        correlationId,
+        stage: kind,
+        role: envelope.role,
+        ...(taskId === undefined ? {} : { taskId }),
+      })
       return { correlationId, kind, spawned: true }
     } catch (error: unknown) {
       try {
@@ -947,26 +980,63 @@ export class OrcService extends Service {
     }
     if (input.status === undefined) throw new OrcError('report status is required')
     const status = input.status
+    const rawText = input.rawText === undefined || input.rawText.length === 0 ? {} : { rawText: input.rawText }
     if (input.stage === 'codex-spec') {
       return {
         type: 'orc/spec/result',
-        data: { version: 1, runId, correlationId, status, ...(status === 'ok' && input.text !== undefined ? { specText: input.text } : {}) },
+        data: {
+          version: 1,
+          runId,
+          correlationId,
+          status,
+          ...(status === 'ok' && input.text !== undefined ? { specText: input.text } : {}),
+          ...rawText,
+        },
       }
     }
     if (input.stage === 'codex-plan') {
       return {
         type: 'orc/plan/result',
-        data: { version: 1, runId, correlationId, status, ...(status === 'ok' && input.text !== undefined ? { planText: input.text } : {}) },
+        data: {
+          version: 1,
+          runId,
+          correlationId,
+          status,
+          ...(status === 'ok' && input.text !== undefined ? { planText: input.text } : {}),
+          ...rawText,
+        },
       }
     }
     const findings = [...(input.findings ?? [])]
     return input.stage === 'codex-review'
-      ? { type: 'orc/review/result', data: { version: 1, runId, correlationId, status, findings } }
-      : { type: 'orc/audit/result', data: { version: 1, runId, correlationId, status, findings } }
+      ? { type: 'orc/review/result', data: { version: 1, runId, correlationId, status, findings, ...rawText } }
+      : { type: 'orc/audit/result', data: { version: 1, runId, correlationId, status, findings, ...rawText } }
   }
 
-  private watch(run: { readonly result: Promise<unknown> }): void {
-    run.result.then(() => undefined, () => undefined)
+  /** Attach a handler before later commits, so a start that never reaches settlement still observes a rejection. */
+  private observeRejection(result: Promise<SubagentResult>): void {
+    void result.then(() => undefined, (error: unknown) => {
+      // Settlement records the durable failure when the phase can accept it. This handler only marks the promise observed.
+      void error
+    })
+  }
+
+  /** Record the Codex final text after the request and any required phase event are durable. */
+  private observeCodex(caller: Agent, result: Promise<SubagentResult>, observed: {
+    readonly correlationId: OrcCorrelationIdentity
+    readonly stage: OrcCodexStage
+    readonly role: 'spec-only' | 'plan-only' | 'review-only' | 'audit-only'
+    readonly taskId?: OrcTaskId
+  }): void {
+    const job = settleCodexRun(this, caller, { ...observed, result })
+    this.codexJobs.set(observed.correlationId, job)
+    void job.then(() => {
+      this.codexJobs.delete(observed.correlationId)
+    }, (error: unknown) => {
+      this.codexJobs.delete(observed.correlationId)
+      // awaitCodex returns this job. A caller that never awaits it must not leave the rejection unhandled.
+      void error
+    })
   }
 }
 

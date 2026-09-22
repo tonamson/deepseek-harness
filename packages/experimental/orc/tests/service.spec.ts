@@ -95,7 +95,7 @@ class FakeSubagents extends Service {
   readonly oneShot: { name: string; request: SubagentStartRequest }[] = []
   failContinuable = false
   failOneShot = false
-  oneShotResult: Promise<unknown> = Promise.resolve({ output: [{ type: 'text', text: 'child text' }], stopReason: 'completed' })
+  oneShotResult: Promise<unknown> = new Promise(() => {})
 
   constructor(ctx: Context) {
     super(ctx, 'subagents')
@@ -430,8 +430,9 @@ describe('ORC delegated results', () => {
         'effort: spec-route-effort',
       ].join('\n'),
     }])
-    await harness.fake.oneShotResult
+    await Promise.resolve()
     expect(harness.service.state(harness.supervisor).specText).toBeUndefined()
+    expect(harness.service.state(harness.supervisor).delegations[0]?.status).toBe('open')
 
     const before = harness.supervisor.session.snapshotEvents().length
     await expect(harness.service.recordResult(harness.supervisor, {
@@ -529,19 +530,13 @@ describe('ORC delegated results', () => {
     harness.fake.failOneShot = false
     harness.fake.oneShotResult = rejected
     const retry = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
-    await Promise.resolve()
+    state = await harness.service.awaitCodex(harness.supervisor, retry.correlationId)
     expect(retry.spawned).toBe(true)
-    await harness.service.recordResult(harness.supervisor, {
-      correlationId: retry.correlationId,
-      stage: 'codex-spec',
-      role: 'spec-only',
-      status: 'malformed',
-    })
-    state = harness.service.state(harness.supervisor)
     expect(state.specText).toBeUndefined()
-    expect(state.delegations.at(-1)).toMatchObject({ status: 'malformed', blocksProgress: true })
-    await expect(harness.service.advance(harness.supervisor, 'plan_required')).rejects.toThrow(/malformed|failure/)
+    expect(state.delegations.at(-1)).toMatchObject({ status: 'unavailable', blocksProgress: true, rawText: 'result rejected' })
+    await expect(harness.service.advance(harness.supervisor, 'plan_required')).rejects.toThrow(/failure/)
 
+    harness.fake.oneShotResult = new Promise(() => {})
     const missing = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
     await harness.service.recordResult(harness.supervisor, {
       correlationId: missing.correlationId,

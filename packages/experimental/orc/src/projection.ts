@@ -151,6 +151,11 @@ const findingInputSchema = z.object({
   severity: severitySchema,
   summary: z.string().min(1),
   taskId: taskIdSchema.optional(),
+  file: z.string().min(1).optional(),
+  location: z.string().min(1).optional(),
+  evidence: z.string().min(1).optional(),
+  remediation: z.string().min(1).optional(),
+  sourceStage: z.enum(['codex-review', 'codex-audit']).optional(),
 }).strict()
 
 const workflowCreatedSchema = z.object({
@@ -204,6 +209,7 @@ const specResultSchema = z.object({
   correlationId: correlationIdSchema,
   status: reportStatusSchema,
   specText: z.string().min(1).optional(),
+  rawText: z.string().min(1).optional(),
 }).strict()
 
 const planRequestedSchema = z.object({
@@ -219,6 +225,7 @@ const planResultSchema = z.object({
   correlationId: correlationIdSchema,
   status: reportStatusSchema,
   planText: z.string().min(1).optional(),
+  rawText: z.string().min(1).optional(),
 }).strict()
 
 const planApprovalSchema = z.object({
@@ -277,6 +284,7 @@ const reviewResultSchema = z.object({
   correlationId: correlationIdSchema,
   status: reportStatusSchema,
   findings: z.array(findingInputSchema),
+  rawText: z.string().min(1).optional(),
 }).strict()
 
 const findingResolvedSchema = z.object({
@@ -647,11 +655,18 @@ function recordCodexText(
     const label = kind === 'codex-spec' ? 'codex spec' : 'codex plan'
     return refuse(state, `${label} result requires text`)
   }
+  const rawText = data.rawText
   return {
     ...state,
     ...(data.status === 'ok' && text !== undefined ? { [field]: text } : {}),
     delegations: state.delegations.map(item => item.correlationId === data.correlationId
-      ? { ...item, status: data.status, blocksProgress: data.status !== 'ok', ...(text === undefined || data.status !== 'ok' ? {} : { text }) }
+      ? {
+        ...item,
+        status: data.status,
+        blocksProgress: data.status !== 'ok',
+        ...(text === undefined || data.status !== 'ok' ? {} : { text }),
+        ...(rawText === undefined ? {} : { rawText }),
+      }
       : item),
   }
 }
@@ -815,6 +830,9 @@ function recordReport(
     if (finding.taskId !== undefined && delegation.scope === 'task' && finding.taskId !== delegation.taskId) {
       return refuse(state, 'finding task does not match the report')
     }
+    if (finding.sourceStage !== undefined && finding.sourceStage !== kind) {
+      return refuse(state, 'finding source stage does not match the report')
+    }
     if (delegation.scope === 'branch' && data.status === 'ok' && state.blockingSeverities.includes(finding.severity)) {
       if (finding.taskId === undefined) return refuse(state, 'branch finding requires an owning task')
       if (taskById(state, finding.taskId) === undefined) return refuse(state, 'branch finding task is not assigned')
@@ -838,11 +856,22 @@ function recordReport(
           scope,
           iteration: delegation.iteration,
           ...(taskId === undefined ? {} : { taskId }),
+          ...(finding.file === undefined ? {} : { file: finding.file }),
+          ...(finding.location === undefined ? {} : { location: finding.location }),
+          ...(finding.evidence === undefined ? {} : { evidence: finding.evidence }),
+          ...(finding.remediation === undefined ? {} : { remediation: finding.remediation }),
+          ...(finding.sourceStage === undefined ? {} : { sourceStage: finding.sourceStage }),
         }
       }),
     ],
     delegations: state.delegations.map(item => item.correlationId === data.correlationId
-      ? { ...item, status: data.status, blocksProgress, findingIds: data.findings.map(finding => finding.id) }
+      ? {
+        ...item,
+        status: data.status,
+        blocksProgress,
+        findingIds: data.findings.map(finding => finding.id),
+        ...(data.rawText === undefined ? {} : { rawText: data.rawText }),
+      }
       : item),
   }
 }

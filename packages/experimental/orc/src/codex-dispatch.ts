@@ -1,0 +1,339 @@
+/**
+ * Codex final-text settlement and the review/audit fix loop.
+ * Child starts stay on `OrcService`. This module does not call `subagents.start` and does not pass `outputSchema`.
+ */
+
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
+import { parseCodexStage, type OrcCodexStage, type OrcNormalizedFinding } from './codex-results.ts'
+import type { OrcService } from './index.ts'
+import { OrcFindingId, OrcTaskId as brandTaskId } from './projection.ts'
+import type {
+  OrcCorrelationId,
+  OrcDelegation,
+  OrcFinding,
+  OrcFindingInput,
+  OrcReportStatus,
+  OrcReviewScope,
+  OrcState,
+  OrcTaskId,
+} from './types.ts'
+
+/** What `OrcService` passes to {@link settleCodexRun} after a Codex start is durable. */
+export interface OrcCodexSettlement {
+  readonly correlationId: OrcCorrelationId
+  readonly stage: OrcCodexStage
+  readonly role: string
+  readonly taskId?: OrcTaskId
+  readonly result: Promise<SubagentResult>
+}
+
+/** Findings and iteration handed to the DeepSeek fix step. */
+export interface OrcFixRequest {
+  readonly taskId: OrcTaskId
+  readonly iteration: number
+  readonly findings: readonly OrcFinding[]
+}
+
+/** Fix step outcome. `failed` stops the loop. `decision` is the durable fix record. */
+export type OrcFixWorkResult = { readonly decision: string } | { readonly failed: string }
+
+/**
+ * DeepSeek fix for one blocking gate.
+ * The dispatcher does not invent a decision or a retry ceiling.
+ */
+export type OrcFixWork = (input: OrcFixRequest) => Promise<OrcFixWorkResult>
+
+const SETTLED_TASK = 'task review requires a settled task'
+const CLEAN_TASKS = 'final review requires every task to be clean'
+
+/**
+ * Parse one Codex result and record it.
+ * `ok` is recorded only after the stage parser accepts the text. Transport failure, missing text, and malformed text stay blocking.
+ * @param service - ORC service that owns the delegation.
+ * @param caller - Supervisor that started the run.
+ * @param input - correlation, stage, and the one-shot result promise.
+ * @returns the projected run after the result event.
+ */
+export async function settleCodexRun(service: OrcService, caller: Agent, input: OrcCodexSettlement): Promise<OrcState> {
+  let settled: SubagentResult
+  try {
+    settled = await input.result
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    return recordParsed(service, caller, input, { status: 'unavailable', ...rawField(message) })
+  }
+  const rawText = codexFinalText(settled.output)
+  if (settled.stopReason !== 'completed') {
+    // A non-completed stop can still carry text. That text is evidence, not a clean report.
+    return recordParsed(service, caller, input, { status: 'failed', ...rawField(rawText) })
+  }
+  const parsed = parseCodexStage(input.stage, rawText)
+  if (parsed.status !== 'ok') {
+    return recordParsed(service, caller, input, { status: parsed.status, ...rawField(parsed.rawText) })
+  }
+  if (parsed.stage !== input.stage) {
+    return recordParsed(service, caller, input, { status: 'malformed', rawText: parsed.rawText })
+  }
+  if (parsed.stage === 'codex-spec' || parsed.stage === 'codex-plan') {
+    return recordParsed(service, caller, input, { status: 'ok', text: parsed.text, rawText: parsed.rawText })
+  }
+  if (parsed.stage === 'codex-review' || parsed.stage === 'codex-audit') {
+    return recordParsed(service, caller, input, {
+      status: 'ok',
+      rawText: parsed.rawText,
+      findings: parsed.findings.map(toFindingInput),
+    })
+  }
+  return assertNever(parsed.stage)
+}
+
+/**
+ * Start the next Codex spec or plan and wait for its parsed result.
+ * The service selects the route from config. This function does not name a model.
+ * @param service - ORC service.
+ * @param caller - Supervisor.
+ * @param signal - cancellation for the one-shot start.
+ * @returns the projected run after the result is recorded.
+ */
+export async function runCodexSpecPlan(service: OrcService, caller: Agent, signal: AbortSignal): Promise<OrcState> {
+  const launch = await service.startSpecPlan(caller, signal)
+  return service.awaitCodex(caller, launch.correlationId)
+}
+
+/**
+ * Run Codex review, then Codex audit, then a DeepSeek fix for every blocking finding, until both gates are clean.
+ * The next task and final completion are not started here. A settled task is required first.
+ * @param service - ORC service.
+ * @param caller - Supervisor.
+ * @param signal - cancellation for each Codex start.
+ * @param fix - DeepSeek fix step. It is not called when the gates have no blocking findings.
+ * @returns the projected run at `next_task`, `final_review`, or the blocking phase.
+ */
+export async function runCodexTaskLoop(
+  service: OrcService,
+  caller: Agent,
+  signal: AbortSignal,
+  fix: OrcFixWork,
+): Promise<OrcState> {
+  const state = service.state(caller)
+  if (state.phase === 'task_peer_settlement') {
+    await service.advance(caller, 'task_review')
+  } else if (state.phase !== 'task_review') {
+    throw new Error(SETTLED_TASK)
+  }
+  return enforceTaskGates(service, caller, signal, fix)
+}
+
+/**
+ * Run branch review and branch audit only after every task is clean.
+ * A blocking finding reopens that task, records `orc/fix/iteration`, and repeats review and audit. Completion is not recorded here.
+ * @param service - ORC service.
+ * @param caller - Supervisor.
+ * @param signal - cancellation for each Codex start.
+ * @param fix - DeepSeek fix step for a blocking branch finding.
+ * @returns the projected run. A clean pair stays in `final_review`.
+ */
+export async function runCodexFinalLoop(
+  service: OrcService,
+  caller: Agent,
+  signal: AbortSignal,
+  fix: OrcFixWork,
+): Promise<OrcState> {
+  const initial = service.state(caller)
+  if (initial.phase !== 'final_review' || initial.tasks.some(task => task.phase !== 'clean')) {
+    throw new Error(CLEAN_TASKS)
+  }
+  for (;;) {
+    const reviewed = await openGate(service, caller, signal, 'codex-review', { scope: 'branch' })
+    const review = reportOf(reviewed, 'codex-review', 'branch', undefined)
+    if (review?.status !== 'ok') return reviewed
+    const audited = await openGate(service, caller, signal, 'codex-audit', { scope: 'branch' })
+    const audit = reportOf(audited, 'codex-audit', 'branch', undefined)
+    if (audit?.status !== 'ok') return audited
+    if (!review.blocksProgress && !audit.blocksProgress) return audited
+    const taskId = blockingFindings(audited, [review, audit]).find(finding => finding.taskId !== undefined)?.taskId
+    if (taskId === undefined) return audited
+    const repaired = await repairTask(service, caller, fix, taskId, [review, audit])
+    if (repaired !== undefined) return repaired
+    const gated = await enforceTaskGates(service, caller, signal, fix)
+    if (gated.phase !== 'final_review') return gated
+  }
+}
+
+interface ParsedRecord {
+  readonly status: OrcReportStatus
+  readonly text?: string
+  readonly rawText?: string
+  readonly findings?: readonly OrcFindingInput[]
+}
+
+/** Record a parsed result. A refused `ok` record is stored as malformed instead of left open. */
+async function recordParsed(service: OrcService, caller: Agent, input: OrcCodexSettlement, recorded: ParsedRecord): Promise<OrcState> {
+  try {
+    return await writeResult(service, caller, input, recorded)
+  } catch (error: unknown) {
+    const current = service.state(caller)
+    if (delegationStatus(current, input.correlationId) !== 'open') return current
+    if (recorded.status !== 'ok') throw error
+    try {
+      return await writeResult(service, caller, input, { status: 'malformed', ...rawField(recorded.rawText) })
+    } catch (fallback: unknown) {
+      const after = service.state(caller)
+      if (delegationStatus(after, input.correlationId) !== 'open') return after
+      throw fallback
+    }
+  }
+}
+
+/** Append one Codex result through the service. */
+function writeResult(service: OrcService, caller: Agent, input: OrcCodexSettlement, recorded: ParsedRecord): Promise<OrcState> {
+  return service.recordResult(caller, {
+    correlationId: input.correlationId,
+    stage: input.stage,
+    role: input.role,
+    ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+    status: recorded.status,
+    ...(recorded.text === undefined ? {} : { text: recorded.text }),
+    ...(recorded.rawText === undefined ? {} : { rawText: recorded.rawText }),
+    ...(recorded.findings === undefined ? {} : { findings: recorded.findings }),
+  })
+}
+
+/** Review then audit for the active task until both gates are clean or one result is blocking. */
+async function enforceTaskGates(service: OrcService, caller: Agent, signal: AbortSignal, fix: OrcFixWork): Promise<OrcState> {
+  for (;;) {
+    const state = service.state(caller)
+    const taskId = state.activeTaskId
+    if (taskId === undefined || state.phase !== 'task_review') throw new Error(SETTLED_TASK)
+    const reviewed = await openGate(service, caller, signal, 'codex-review', { scope: 'task', taskId })
+    const review = reportOf(reviewed, 'codex-review', 'task', taskId)
+    if (review?.status !== 'ok') return reviewed
+    await service.advance(caller, 'task_audit')
+    const audited = await openGate(service, caller, signal, 'codex-audit', { scope: 'task', taskId })
+    const audit = reportOf(audited, 'codex-audit', 'task', taskId)
+    if (audit?.status !== 'ok') return audited
+    if (review.blocksProgress || audit.blocksProgress) {
+      const repaired = await repairTask(service, caller, fix, taskId, [review, audit])
+      if (repaired !== undefined) return repaired
+      continue
+    }
+    const remaining = audited.tasks.some(task => task.id !== taskId && task.phase !== 'clean')
+    return remaining ? service.advance(caller, 'next_task') : service.advance(caller, 'final_review')
+  }
+}
+
+/** Record the fix, or fail the run when the fix step cannot continue. Returns undefined when review can run again. */
+async function repairTask(
+  service: OrcService,
+  caller: Agent,
+  fix: OrcFixWork,
+  taskId: OrcTaskId,
+  reports: readonly OrcDelegation[],
+): Promise<OrcState | undefined> {
+  const before = service.state(caller)
+  const task = before.tasks.find(item => item.id === taskId)
+  if (task === undefined) throw new Error(SETTLED_TASK)
+  if (before.phase !== 'task_fix') {
+    await service.advance(caller, 'task_fix', before.phase === 'final_review' ? taskId : undefined)
+  }
+  const findings = blockingFindings(service.state(caller), reports)
+  let work: OrcFixWorkResult
+  try {
+    work = await fix({ taskId, iteration: task.iteration + 1, findings })
+  } catch (error: unknown) {
+    return service.fail(caller, error instanceof Error ? error.message : String(error))
+  }
+  if ('failed' in work) return service.fail(caller, work.failed)
+  await service.recordFix(caller, { taskId, iteration: task.iteration + 1, decision: work.decision })
+  await service.advance(caller, 'task_review')
+  return undefined
+}
+
+/** Start one review or audit and wait for its own result. */
+async function openGate(
+  service: OrcService,
+  caller: Agent,
+  signal: AbortSignal,
+  kind: 'codex-review' | 'codex-audit',
+  input: { readonly scope: OrcReviewScope; readonly taskId?: OrcTaskId },
+): Promise<OrcState> {
+  const request = { scope: input.scope, signal, ...(input.taskId === undefined ? {} : { taskId: input.taskId }) }
+  const launch = kind === 'codex-review'
+    ? await service.requestReview(caller, request)
+    : await service.requestAudit(caller, request)
+  return service.awaitCodex(caller, launch.correlationId)
+}
+
+/** Delegation recorded for this scope and iteration. */
+function reportOf(
+  state: OrcState,
+  kind: 'codex-review' | 'codex-audit',
+  scope: OrcReviewScope,
+  taskId: OrcTaskId | undefined,
+): OrcDelegation | undefined {
+  const task = taskId === undefined ? undefined : state.tasks.find(item => item.id === taskId)
+  const iteration = scope === 'branch' ? state.branchVisit : task?.iteration
+  return state.delegations.find(item => item.kind === kind
+    && item.scope === scope
+    && item.iteration === iteration
+    && item.taskId === taskId)
+}
+
+/** Findings on these reports whose severity is in the run's blocking set. */
+function blockingFindings(state: OrcState, reports: readonly OrcDelegation[]): OrcFinding[] {
+  const ids = new Set(reports.flatMap(report => report.findingIds))
+  return state.findings.filter(finding => ids.has(finding.id) && state.blockingSeverities.includes(finding.severity))
+}
+
+/** Current status, or `open` when the row is missing. */
+function delegationStatus(state: OrcState, correlationId: OrcCorrelationId): string {
+  return state.delegations.find(item => item.correlationId === correlationId)?.status ?? 'open'
+}
+
+/** Omit blank text. The result schema rejects an empty raw string. */
+function rawField(text: string | undefined): { readonly rawText?: string } {
+  if (text === undefined || text.length === 0) return {}
+  return { rawText: text }
+}
+
+/** Copy a parsed finding onto the result event. */
+function toFindingInput(finding: OrcNormalizedFinding): OrcFindingInput {
+  return {
+    id: OrcFindingId(finding.id),
+    severity: finding.severity,
+    summary: finding.summary,
+    taskId: brandTaskId(finding.taskId),
+    file: finding.file,
+    location: finding.location,
+    evidence: finding.evidence,
+    remediation: finding.remediation,
+    sourceStage: finding.sourceStage,
+  }
+}
+
+/** Close a stage union. */
+function assertNever(value: never): never {
+  throw new Error(`unexpected Codex stage ${String(value)}`)
+}
+
+/**
+ * Join text blocks from a Codex result.
+ * Other block types are not the final answer.
+ */
+function codexFinalText(output: readonly ContentBlock[]): string | undefined {
+  let text = ''
+  for (const block of output) {
+    switch (block.type) {
+      case 'text':
+        text += block.text
+        break
+      default:
+        // Content blocks are merge-extensible. Reasoning and tool blocks stay out of the parsed answer.
+        break
+    }
+  }
+  const trimmed = text.trim()
+  return trimmed.length === 0 ? undefined : trimmed
+}

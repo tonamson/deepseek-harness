@@ -120,6 +120,12 @@ export interface OrcFinding {
   readonly scope: OrcReviewScope
   readonly iteration: number
   readonly taskId?: OrcTaskId
+  readonly file?: string
+  readonly location?: string
+  readonly evidence?: string
+  readonly remediation?: string
+  /** Review or audit stage that produced the finding. */
+  readonly sourceStage?: 'codex-review' | 'codex-audit'
 }
 
 /**
@@ -146,6 +152,8 @@ export interface OrcDelegation {
   readonly model?: string
   readonly effort?: string
   readonly text?: string
+  /** Codex final text before normalization. Present once that answer is recorded. */
+  readonly rawText?: string
   /**
    * Codex subagent run id. Present only after `start` returned.
    * An open row without it is not a running child.
@@ -257,6 +265,8 @@ export interface OrcSpecResult {
   readonly correlationId: OrcCorrelationId
   readonly status: OrcReportStatus
   readonly specText?: string
+  /** Codex final text before normalization. */
+  readonly rawText?: string
 }
 
 /** Version-1 Codex plan request. */
@@ -274,6 +284,8 @@ export interface OrcPlanResult {
   readonly correlationId: OrcCorrelationId
   readonly status: OrcReportStatus
   readonly planText?: string
+  /** Codex final text before normalization. */
+  readonly rawText?: string
 }
 
 /** Version-1 explicit plan approval. This is not a plan-mode flag. */
@@ -329,6 +341,12 @@ export interface OrcFindingInput {
   readonly severity: OrcSeverity
   readonly summary: string
   readonly taskId?: OrcTaskId
+  readonly file?: string
+  readonly location?: string
+  readonly evidence?: string
+  readonly remediation?: string
+  /** Review or audit stage that produced the finding. It must match the result event. */
+  readonly sourceStage?: 'codex-review' | 'codex-audit'
 }
 
 /** Version-1 review or audit result. */
@@ -338,6 +356,8 @@ export interface OrcReviewResult {
   readonly correlationId: OrcCorrelationId
   readonly status: OrcReportStatus
   readonly findings: readonly OrcFindingInput[]
+  /** Codex final text before normalization. */
+  readonly rawText?: string
 }
 
 /** Version-1 finding resolution. Resolution does not by itself advance the run. */
