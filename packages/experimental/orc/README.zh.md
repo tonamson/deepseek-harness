@@ -50,7 +50,7 @@ kind: "package-library"
 
 `./invariant` 伴随模块监听 `session/event`，并忽略 `orc/*` 以外的每个类型。它折叠已提交前缀，应用候选事件，并在投影拒绝时报告失败。检查发生在事件被追加之前。
 
-`OrcService` 注入 agents、sessions、session persistence、session projections 与 subagents。它注册 `orc` 投影并读回该投影。只有当日志行匹配 correlation、stage、role 与 task 时，结果才会被追加。工具与已发布的会话事件表留在本包之外。
+`OrcService` 注入 agents、sessions、session persistence、session projections 与 subagents。它注册 `orc` 投影并读回该投影。只有当日志行匹配 correlation、stage、role 与 task 时，结果才会被追加。Codex 请求事件在 `start` 返回后保存 `continuationId`，Lead 或 Peer 节点在 `startContinuable` 返回后保存 `messageId`。没有该句柄的未完成行会被记成阻断失败，并且不会被当作可恢复的子运行。工具与已发布的会话事件表留在本包之外。
 
 </details>
 

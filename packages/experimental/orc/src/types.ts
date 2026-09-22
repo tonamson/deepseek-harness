@@ -146,6 +146,16 @@ export interface OrcDelegation {
   readonly model?: string
   readonly effort?: string
   readonly text?: string
+  /**
+   * Codex subagent run id. Present only after `start` returned.
+   * An open row without it is not a running child.
+   */
+  readonly continuationId?: string
+  /**
+   * Continuable inbox message id. Present only after `startContinuable` returned.
+   * DeepSeek `nodeId` is the child session id.
+   */
+  readonly messageId?: string
   readonly findingIds: readonly OrcFindingId[]
 }
 
@@ -188,6 +198,8 @@ export interface OrcCodexEnvelope extends OrcProviderSelection {
   readonly skillRequirements: string
   readonly outputSchema: string
   readonly readOnly: true
+  /** Subagent run id. Omitted when the request is recorded before start returns. */
+  readonly continuationId?: string
 }
 
 /** Version-1 payload that opens a run and its Supervisor root. */
@@ -217,6 +229,8 @@ export interface OrcNodeCreated extends OrcProviderSelection {
   readonly writeScope: readonly string[]
   readonly acceptanceCriteria: string
   readonly reportingFormat: string
+  /** Inbox message id. Omitted when the node is recorded before startContinuable returns. */
+  readonly messageId?: string
 }
 
 /** Version-1 payload that settles a role node. */

@@ -75,11 +75,19 @@ class FakeAgents extends Service {
 }
 
 class FakePersistence extends Service {
+  flushFailure: Error | undefined
+
   constructor(ctx: Context) {
     super(ctx, 'sessionPersistence')
   }
 
-  async flush(): Promise<void> {}
+  async flush(): Promise<void> {
+    if (this.flushFailure !== undefined) {
+      const failure = this.flushFailure
+      this.flushFailure = undefined
+      throw failure
+    }
+  }
 }
 
 class FakeSubagents extends Service {
@@ -274,6 +282,7 @@ describe('ORC service role tree', () => {
     expect(bare?.model).toBeUndefined()
     expect(bare?.effort).toBeUndefined()
     expect(bare?.role).toBe('spec-only')
+    expect(bare?.continuation).toBeUndefined()
     await expect(harness.service.requestReview(harness.supervisor, { scope: 'branch', signal: SIGNAL })).rejects.toThrow(/not allowed/)
     await expect(harness.service.requestReview(harness.supervisor, {
       scope: 'task',
@@ -593,6 +602,19 @@ describe('ORC delegated results', () => {
     specAppend.fake.failOneShot = true
     await expect(specAppend.service.startSpecPlan(specAppend.supervisor, SIGNAL)).rejects.toBeInstanceOf(AggregateError)
     expect(specAppend.service.state(specAppend.supervisor).delegations[0]?.status).toBe('open')
+    expect(specAppend.service.state(specAppend.supervisor).delegations[0]?.continuationId).toBeUndefined()
+    specSession.append = specAppendOriginal
+    specAppend.fake.failOneShot = false
+    await expect(specAppend.service.startSpecPlan(specAppend.supervisor, SIGNAL)).rejects.toThrow(/no continuation handle/)
+    expect(specAppend.service.state(specAppend.supervisor).delegations[0]).toMatchObject({
+      status: 'failed',
+      blocksProgress: true,
+    })
+    expect(specAppend.service.state(specAppend.supervisor).phase).toBe('spec_required')
+    expect(specAppend.fake.oneShot).toHaveLength(0)
+    const retry = await specAppend.service.startSpecPlan(specAppend.supervisor, SIGNAL)
+    expect(retry.spawned).toBe(true)
+    expect(retry.correlationId).not.toBe(specAppend.service.state(specAppend.supervisor).delegations[0]?.correlationId)
 
     const reviewAppend = await setup()
     await atTaskReview(reviewAppend)
@@ -629,6 +651,154 @@ describe('ORC delegated results', () => {
     })).rejects.toBeInstanceOf(AggregateError)
     expect(reviewAggregate.service.state(reviewAggregate.supervisor).delegations.some(item =>
       item.kind === 'codex-review' && item.status === 'open')).toBe(true)
+    reviewSession.append = reviewOriginal
+    await expect(reviewAggregate.service.requestReview(reviewAggregate.supervisor, {
+      scope: 'task',
+      taskId: TASK,
+      signal: SIGNAL,
+    })).rejects.toThrow(/no continuation handle/)
+    expect(reviewAggregate.service.state(reviewAggregate.supervisor).delegations.some(item =>
+      item.kind === 'codex-review' && item.status === 'failed' && item.blocksProgress)).toBe(true)
+    expect(reviewAggregate.fake.oneShot.some(call => call.name === CONFIG.codexReview.subagentProvider)).toBe(false)
+  })
+
+  it('closes an open Codex row when phase append or flush fails and does not resume it', async () => {
+    const flushed = await setup()
+    await createRun(flushed)
+    const persistence = flushed.ctx.get('sessionPersistence') as FakePersistence
+    persistence.flushFailure = new Error('flush failed')
+    await expect(flushed.service.startSpecPlan(flushed.supervisor, SIGNAL)).rejects.toThrow(/flush failed/)
+    expect(flushed.service.state(flushed.supervisor).phase).toBe('spec_required')
+    expect(flushed.service.state(flushed.supervisor).delegations.at(-1)).toMatchObject({
+      status: 'failed',
+      blocksProgress: true,
+    })
+    const again = await flushed.service.startSpecPlan(flushed.supervisor, SIGNAL)
+    expect(again.spawned).toBe(true)
+    expect(flushed.fake.oneShot).toHaveLength(2)
+
+    const phased = await setup()
+    await createRun(phased)
+    const phaseSession = phased.supervisor.session
+    const phaseAppend = phaseSession.append.bind(phaseSession)
+    let phaseFailed = false
+    phaseSession.append = ((type: string, data: unknown) => {
+      if (type === 'orc/phase' && !phaseFailed) {
+        phaseFailed = true
+        throw new Error('phase append failed')
+      }
+      return (phaseAppend as (eventType: string, eventData: unknown) => unknown)(type, data)
+    }) as Session['append']
+    await expect(phased.service.startSpecPlan(phased.supervisor, SIGNAL)).rejects.toThrow(/phase append failed/)
+    expect(phased.service.state(phased.supervisor).phase).toBe('spec_required')
+    expect(phased.service.state(phased.supervisor).delegations.at(-1)).toMatchObject({
+      status: 'failed',
+      blocksProgress: true,
+    })
+    const retried = await phased.service.startSpecPlan(phased.supervisor, SIGNAL)
+    expect(retried.spawned).toBe(true)
+  })
+
+  it('does not resume an open row that never received a continuation handle', async () => {
+    const spec = await setup()
+    await createRun(spec)
+    const specSession = spec.supervisor.session
+    const appendSpec = specSession.append.bind(specSession) as (type: string, data: unknown) => void
+    const runId = spec.service.state(spec.supervisor).runId
+    appendSpec('orc/spec/requested', {
+      version: 1,
+      runId,
+      correlationId: 'partial-spec',
+      role: 'spec-only',
+      repositoryPath: '/repo/orc',
+      skillRequirements: 'superpowers workflow',
+      outputSchema: 'spec-schema',
+      readOnly: true,
+    })
+    expect(spec.service.registration(spec.supervisor, OrcCorrelationId('partial-spec'))?.continuation).toBeUndefined()
+    await expect(spec.service.startSpecPlan(spec.supervisor, SIGNAL)).rejects.toThrow(/no continuation handle/)
+    expect(spec.fake.oneShot).toHaveLength(0)
+    expect(spec.service.state(spec.supervisor).delegations[0]).toMatchObject({ status: 'failed', blocksProgress: true })
+    expect(spec.service.state(spec.supervisor).phase).toBe('spec_required')
+    const started = await spec.service.startSpecPlan(spec.supervisor, SIGNAL)
+    expect(started.spawned).toBe(true)
+    expect(spec.service.state(spec.supervisor).delegations.at(-1)?.continuationId).toBe('shot-1')
+    await spec.service.recordResult(spec.supervisor, {
+      correlationId: started.correlationId,
+      stage: 'codex-spec',
+      role: 'spec-only',
+      status: 'ok',
+      text: 'design spec',
+    })
+    await spec.service.advance(spec.supervisor, 'plan_required')
+    appendSpec('orc/plan/requested', {
+      version: 1,
+      runId,
+      correlationId: 'partial-plan',
+      role: 'plan-only',
+      repositoryPath: '/repo/orc',
+      skillRequirements: 'superpowers workflow',
+      outputSchema: 'plan-schema',
+      readOnly: true,
+    })
+    await expect(spec.service.startSpecPlan(spec.supervisor, SIGNAL)).rejects.toThrow(/no continuation handle/)
+    expect(spec.fake.oneShot).toHaveLength(1)
+    expect(spec.service.state(spec.supervisor).delegations.find(item => item.correlationId === OrcCorrelationId('partial-plan'))).toMatchObject({
+      status: 'failed',
+      blocksProgress: true,
+    })
+
+    const lead = await setup()
+    await implementing(lead)
+    const leadRun = lead.service.state(lead.supervisor).runId
+    const appendLead = lead.supervisor.session.append.bind(lead.supervisor.session) as (type: string, data: unknown) => void
+    appendLead('orc/node/created', {
+      version: 1,
+      runId: leadRun,
+      nodeId: 'partial-lead',
+      parentId: lead.supervisor.id,
+      role: 'lead',
+      taskId: TASK,
+      correlationId: 'partial-lead',
+      prompt: 'lead prompt',
+      skillEnvelope: 'superpowers lead',
+      writeScope: ['src'],
+      acceptanceCriteria: 'report evidence',
+      reportingFormat: 'settlement event',
+    })
+    expect(lead.service.registration(lead.supervisor, OrcCorrelationId('partial-lead'))?.continuation).toBeUndefined()
+    await expect(lead.service.spawn(lead.supervisor, leadInput())).rejects.toThrow(/no continuation handle/)
+    expect(lead.fake.continuable).toHaveLength(0)
+    expect(lead.service.state(lead.supervisor).tasks[0]?.phase).toBe('failed')
+    expect(lead.service.state(lead.supervisor).delegations.at(-1)).toMatchObject({ status: 'failed', blocksProgress: true })
+
+    const audit = await setup()
+    const reviewed = await atTaskReview(audit)
+    const auditReview = await audit.service.requestReview(audit.supervisor, { scope: 'task', taskId: TASK, signal: SIGNAL })
+    await recordReport(audit, auditReview.correlationId, 'codex-review', 'review-only', 'ok', TASK)
+    await audit.service.advance(reviewed.lead, 'task_audit')
+    const auditRun = audit.service.state(audit.supervisor).runId
+    const appendAudit = audit.supervisor.session.append.bind(audit.supervisor.session) as (type: string, data: unknown) => void
+    appendAudit('orc/audit/requested', {
+      version: 1,
+      runId: auditRun,
+      correlationId: 'partial-audit',
+      scope: 'task',
+      iteration: 0,
+      taskId: TASK,
+      role: 'audit-only',
+      repositoryPath: '/repo/orc',
+      skillRequirements: 'superpowers workflow',
+      outputSchema: 'audit-schema',
+      readOnly: true,
+    })
+    const shots = audit.fake.oneShot.length
+    await expect(audit.service.requestAudit(audit.supervisor, { scope: 'task', taskId: TASK, signal: SIGNAL })).rejects.toThrow(/no continuation handle/)
+    expect(audit.fake.oneShot).toHaveLength(shots)
+    expect(audit.service.state(audit.supervisor).delegations.find(item => item.correlationId === OrcCorrelationId('partial-audit'))).toMatchObject({
+      status: 'failed',
+      blocksProgress: true,
+    })
   })
 })
 
@@ -651,7 +821,7 @@ describe('ORC resume and later gates', () => {
     expect(resumed.registration(harness.supervisor, launch.correlationId)).toMatchObject({
       stage: 'codex-spec',
       role: 'spec-only',
-      continuation: { kind: 'one-shot', id: launch.correlationId },
+      continuation: { kind: 'one-shot', id: 'shot-1' },
     })
     await resumed.recordResult(harness.supervisor, {
       correlationId: launch.correlationId,
@@ -676,10 +846,12 @@ describe('ORC resume and later gates', () => {
     expect(again.nodeId).toBe(launch.nodeId)
     expect(harness.fake.continuable).toHaveLength(1)
     expect(resumed.state(harness.supervisor).phase).toBe('task_implementation')
-    expect(resumed.registration(harness.supervisor, launch.correlationId)?.continuation).toMatchObject({
+    expect(resumed.registration(harness.supervisor, launch.correlationId)?.continuation).toEqual({
       kind: 'continuable',
       id: launch.nodeId,
+      messageId: 'msg-1',
     })
+    expect(resumed.state(harness.supervisor).delegations.find(item => item.correlationId === launch.correlationId)?.messageId).toBe('msg-1')
   })
 
   it('keeps review and audit separate through fix and final branch gates', async () => {

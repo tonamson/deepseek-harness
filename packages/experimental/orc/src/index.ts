@@ -151,7 +151,8 @@ export interface OrcRegistration {
   readonly model?: string
   readonly effort?: string
   readonly nodeId?: OrcNodeIdentity
-  readonly continuation: {
+  /** Absent when the log has no handle from a finished child start. */
+  readonly continuation?: {
     readonly kind: 'continuable' | 'one-shot'
     readonly id: string
     readonly messageId?: string
@@ -327,6 +328,7 @@ export class OrcService extends Service {
     // oxlint-disable-next-line typescript/no-non-null-assertion -- supervisor root is present for every delegation
     const parentId = node?.parentId ?? supervisor!.id
     const live = this.live.get(correlationId)
+    const continuation = live ?? this.persistedContinuation(delegation)
     return {
       correlationId,
       parentId,
@@ -337,10 +339,7 @@ export class OrcService extends Service {
       ...(delegation.model === undefined ? {} : { model: delegation.model }),
       ...(delegation.effort === undefined ? {} : { effort: delegation.effort }),
       ...(delegation.nodeId === undefined ? {} : { nodeId: delegation.nodeId }),
-      continuation: live ?? {
-        kind: delegation.kind === 'deepseek-node' ? 'continuable' : 'one-shot',
-        id: String(delegation.nodeId ?? delegation.correlationId),
-      },
+      ...(continuation === undefined ? {} : { continuation }),
     }
   }
 
@@ -356,7 +355,11 @@ export class OrcService extends Service {
     const runId = this.requireRun(state)
     const open = state.delegations.find(item =>
       (item.kind === 'codex-spec' || item.kind === 'codex-plan') && item.status === 'open')
-    if (open !== undefined) return this.launchFrom(open, false)
+    if (open !== undefined) {
+      if (open.continuationId !== undefined) return this.launchFrom(open, false)
+      await this.closeUnstarted(session, caller, open)
+      throw new OrcError('delegated run has no continuation handle')
+    }
     const correlationId = OrcCorrelationId(randomUUID())
     const spec = this.codexRequest(runId, correlationId, 'codex-spec')
     const specFailure = applyOrc(state, spec).failure
@@ -426,7 +429,11 @@ export class OrcService extends Service {
       }
       return state.nodes.find(node => node.id === item.nodeId)?.parentId === parentId
     })
-    if (open !== undefined) return this.launchFrom(open, false)
+    if (open !== undefined) {
+      if (open.messageId !== undefined) return this.launchFrom(open, false)
+      await this.closeUnstarted(session, actor, open)
+      throw new OrcError('delegated run has no continuation handle')
+    }
     const route = this.config.deepseek
     const nodeId = OrcNodeId(randomUUID())
     const correlationId = OrcCorrelationId(randomUUID())
@@ -452,7 +459,6 @@ export class OrcService extends Service {
     }
     const refused = applyOrc(state, event)
     if (refused.failure !== undefined) throw new OrcError(refused.failure)
-    await this.commit(session, event)
     try {
       const started = await this.ctx.subagents.startContinuable({
         provider: route.subagentProvider,
@@ -469,11 +475,13 @@ export class OrcService extends Service {
         },
         signal: input.signal,
       })
-      this.live.set(correlationId, { kind: 'continuable', id: started.childId, messageId: String(started.messageId) })
+      const messageId = String(started.messageId)
+      await this.commit(session, { type: 'orc/node/created', data: { ...event.data, messageId } })
+      this.live.set(correlationId, { kind: 'continuable', id: started.childId, messageId })
       return { correlationId, kind: 'deepseek-node', spawned: true, nodeId }
     } catch (error: unknown) {
       try {
-        await this.commit(session, {
+        await this.ensureRequestClosed(session, actor, event, correlationId, undefined, {
           type: 'orc/node/settled',
           data: { version: 1, runId, nodeId, outcome: 'failed', evidence: errorText(error) },
         })
@@ -674,9 +682,67 @@ export class OrcService extends Service {
     return this.readState(session)
   }
 
-  private async commitIfLegal(session: Session, event: OrcEvent): Promise<void> {
-    if (applyOrc(this.readState(session), event).failure !== undefined) return
-    await this.commit(session, event)
+  private persistedContinuation(delegation: OrcDelegation): LiveContinuation | undefined {
+    if (delegation.kind === 'deepseek-node') {
+      if (delegation.messageId === undefined) return undefined
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- a deepseek delegation stores its node id
+      return { kind: 'continuable', id: delegation.nodeId!, messageId: delegation.messageId }
+    }
+    if (delegation.continuationId === undefined) return undefined
+    return { kind: 'one-shot', id: delegation.continuationId }
+  }
+
+  private startupFailure(runId: ReturnType<typeof OrcRunId>, open: OrcDelegation, evidence: string): OrcEvent {
+    const correlationId = open.correlationId
+    if (open.kind === 'deepseek-node') {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- a deepseek delegation stores its node id
+      const nodeId = open.nodeId!
+      return { type: 'orc/node/settled', data: { version: 1, runId, nodeId, outcome: 'failed', evidence } }
+    }
+    if (open.kind === 'codex-spec') {
+      return { type: 'orc/spec/result', data: { version: 1, runId, correlationId, status: 'failed' } }
+    }
+    if (open.kind === 'codex-plan') {
+      return { type: 'orc/plan/result', data: { version: 1, runId, correlationId, status: 'failed' } }
+    }
+    if (open.kind === 'codex-review') {
+      return { type: 'orc/review/result', data: { version: 1, runId, correlationId, status: 'failed', findings: [] } }
+    }
+    return { type: 'orc/audit/result', data: { version: 1, runId, correlationId, status: 'failed', findings: [] } }
+  }
+
+  /** Close an open row that has no persisted start handle. Spec results need `spec_required` first. */
+  private async closeUnstarted(session: Session, caller: Agent, open: OrcDelegation): Promise<void> {
+    const runId = this.requireRun(this.readState(session))
+    if (open.kind === 'codex-spec' && this.readState(session).phase !== 'spec_required') {
+      await this.commit(session, {
+        type: 'orc/phase',
+        data: { version: 1, runId, to: 'spec_required', actorNodeId: OrcNodeId(caller.id) },
+      })
+    }
+    await this.commit(session, this.startupFailure(runId, open, 'delegated run has no continuation handle'))
+  }
+
+  /** Record the request if it is missing, the spec phase if it is missing, then the blocking result if the row is still open. */
+  private async ensureRequestClosed(
+    session: Session,
+    caller: Agent,
+    request: OrcEvent,
+    correlationId: OrcCorrelationIdentity,
+    phase: OrcWorkflowPhase | undefined,
+    failure: OrcEvent,
+  ): Promise<void> {
+    if (!this.readState(session).delegations.some(item => item.correlationId === correlationId)) {
+      await this.commit(session, request)
+    }
+    const runId = this.requireRun(this.readState(session))
+    if (phase !== undefined && this.readState(session).phase !== phase) {
+      await this.commit(session, {
+        type: 'orc/phase',
+        data: { version: 1, runId, to: phase, actorNodeId: OrcNodeId(caller.id) },
+      })
+    }
+    await this.commit(session, failure)
   }
 
   private codexRequest(
@@ -709,13 +775,6 @@ export class OrcService extends Service {
   ): Promise<OrcLaunch> {
     const correlationId = event.data.correlationId
     const runId = event.data.runId
-    await this.commit(session, event)
-    if (phase !== undefined) {
-      await this.commitIfLegal(session, {
-        type: 'orc/phase',
-        data: { version: 1, runId, to: phase, actorNodeId: OrcNodeId(caller.id) },
-      })
-    }
     const failure: OrcEvent = event.type === 'orc/spec/requested'
       ? { type: 'orc/spec/result', data: { version: 1, runId, correlationId, status: 'failed' } }
       : { type: 'orc/plan/result', data: { version: 1, runId, correlationId, status: 'failed' } }
@@ -735,12 +794,23 @@ export class OrcService extends Service {
         parent: caller,
         signal,
       })
-      this.live.set(correlationId, { kind: 'one-shot', id: String(run.id) })
+      const continuationId = String(run.id)
+      const requested: typeof event = event.type === 'orc/spec/requested'
+        ? { type: 'orc/spec/requested', data: { ...event.data, continuationId } }
+        : { type: 'orc/plan/requested', data: { ...event.data, continuationId } }
+      await this.commit(session, requested)
+      if (phase !== undefined && this.readState(session).phase !== phase) {
+        await this.commit(session, {
+          type: 'orc/phase',
+          data: { version: 1, runId, to: phase, actorNodeId: OrcNodeId(caller.id) },
+        })
+      }
+      this.live.set(correlationId, { kind: 'one-shot', id: continuationId })
       this.watch(run)
       return { correlationId, kind: event.type === 'orc/spec/requested' ? 'codex-spec' : 'codex-plan', spawned: true }
     } catch (error: unknown) {
       try {
-        await this.commit(session, failure)
+        await this.ensureRequestClosed(session, caller, event, correlationId, phase, failure)
       } catch (appendError: unknown) {
         throw new AggregateError([error, appendError], 'ORC child startup and durable failure append both failed')
       }
@@ -757,7 +827,11 @@ export class OrcService extends Service {
       && item.status === 'open'
       && item.scope === input.scope
       && item.taskId === taskId)
-    if (open !== undefined) return this.launchFrom(open, false)
+    if (open !== undefined) {
+      if (open.continuationId !== undefined) return this.launchFrom(open, false)
+      await this.closeUnstarted(session, caller, open)
+      throw new OrcError('delegated run has no continuation handle')
+    }
     const review = kind === 'codex-review'
     const route = review ? this.config.codexReview : this.config.codexAudit
     const correlationId = OrcCorrelationId(randomUUID())
@@ -786,7 +860,8 @@ export class OrcService extends Service {
     const failure: OrcEvent = review
       ? { type: 'orc/review/result', data: { version: 1, runId, correlationId, status: 'failed', findings: [] } }
       : { type: 'orc/audit/result', data: { version: 1, runId, correlationId, status: 'failed', findings: [] } }
-    await this.commit(session, event)
+    const refused = applyOrc(this.readState(session), event)
+    if (refused.failure !== undefined) throw new OrcError(refused.failure)
     try {
       const run = await this.ctx.subagents.start(route.subagentProvider, {
         label: envelope.role,
@@ -794,12 +869,17 @@ export class OrcService extends Service {
         parent: caller,
         signal: input.signal,
       })
-      this.live.set(correlationId, { kind: 'one-shot', id: String(run.id) })
+      const continuationId = String(run.id)
+      const requested: OrcEvent = review
+        ? { type: 'orc/review/requested', data: { ...event.data, continuationId } }
+        : { type: 'orc/audit/requested', data: { ...event.data, continuationId } }
+      await this.commit(session, requested)
+      this.live.set(correlationId, { kind: 'one-shot', id: continuationId })
       this.watch(run)
       return { correlationId, kind, spawned: true }
     } catch (error: unknown) {
       try {
-        await this.commit(session, failure)
+        await this.ensureRequestClosed(session, caller, event, correlationId, undefined, failure)
       } catch (appendError: unknown) {
         throw new AggregateError([error, appendError], 'ORC child startup and durable failure append both failed')
       }

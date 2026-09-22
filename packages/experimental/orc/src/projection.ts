@@ -141,6 +141,7 @@ function codexFields(role: 'spec-only' | 'plan-only' | 'review-only' | 'audit-on
     skillRequirements: z.string().min(1),
     outputSchema: z.string().min(1),
     readOnly: z.literal(true),
+    continuationId: z.string().min(1).optional(),
     ...selectionSchema,
   }
 }
@@ -178,6 +179,7 @@ const nodeCreatedSchema = z.object({
   writeScope: textListSchema,
   acceptanceCriteria: z.string().min(1),
   reportingFormat: z.string().min(1),
+  messageId: z.string().min(1).optional(),
   ...selectionSchema,
 }).strict()
 
@@ -543,6 +545,7 @@ function createNode(state: OrcState, event: Extract<OrcEvent, { type: 'orc/node/
     prompt: data.prompt,
     skillEnvelope: data.skillEnvelope,
     findingIds: [],
+    ...(data.messageId === undefined ? {} : { messageId: data.messageId }),
     ...selectionOf(data),
   }
   return { ...state, nodes: [...state.nodes, node], delegations: [...state.delegations, delegation] }
@@ -612,6 +615,7 @@ function requestCodex(
     outputSchema: data.outputSchema,
     readOnly: true,
     findingIds: [],
+    ...(data.continuationId === undefined ? {} : { continuationId: data.continuationId }),
     ...selectionOf(data),
   }
   return { ...state, delegations: [...state.delegations, delegation] }
@@ -781,6 +785,7 @@ function requestReport(
     outputSchema: data.outputSchema,
     readOnly: true,
     findingIds: [],
+    ...(data.continuationId === undefined ? {} : { continuationId: data.continuationId }),
     ...selectionOf(data),
   }
   return { ...state, delegations: [...state.delegations, delegation] }

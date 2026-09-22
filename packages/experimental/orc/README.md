@@ -50,7 +50,7 @@ Event names and payload version stay at version 1. This package does not migrate
 
 The `./invariant` companion listens for `session/event` and ignores every type outside `orc/*`. It folds the committed prefix, applies the candidate, and reports a failure when the projection refuses it. The check runs before the event is appended.
 
-`OrcService` injects agents, sessions, session persistence, session projections, and subagents. It registers an `orc` projection and reads that projection back. A result appends only when the log row matches the correlation, stage, role, and task. Tools and the released session event map stay outside this package.
+`OrcService` injects agents, sessions, session persistence, session projections, and subagents. It registers an `orc` projection and reads that projection back. A result appends only when the log row matches the correlation, stage, role, and task. Codex request events store `continuationId` after `start` returns, and a Lead or Peer node stores `messageId` after `startContinuable` returns. An open row without that handle is closed as a blocking failure and is not resumed. Tools and the released session event map stay outside this package.
 
 </details>
 
