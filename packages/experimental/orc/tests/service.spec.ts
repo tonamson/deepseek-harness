@@ -356,6 +356,46 @@ describe('ORC service role tree', () => {
   })
 })
 
+describe('ORC supervisor authority', () => {
+  it('refuses spec, approval, and assignment from a caller who is not the supervisor', async () => {
+    const harness = await setup()
+    await createRun(harness)
+    const intruder = { id: SessionId('intruder'), session: harness.supervisor.session, options: {} } as Agent
+    await expect(harness.service.startSpecPlan(intruder, SIGNAL)).rejects.toThrow(/only the supervisor/)
+    expect(harness.fake.oneShot).toHaveLength(0)
+    expect(harness.service.state(harness.supervisor).phase).toBe('brainstorming')
+
+    const spec = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    await harness.service.recordResult(harness.supervisor, {
+      correlationId: spec.correlationId,
+      stage: 'codex-spec',
+      role: 'spec-only',
+      status: 'ok',
+      text: 'design spec',
+    })
+    await harness.service.advance(harness.supervisor, 'plan_required', TASK)
+    const plan = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    await harness.service.recordResult(harness.supervisor, {
+      correlationId: plan.correlationId,
+      stage: 'codex-plan',
+      role: 'plan-only',
+      status: 'ok',
+      text: 'implementation plan',
+    })
+    await harness.service.advance(harness.supervisor, 'awaiting_user_approval')
+    await expect(harness.service.approvePlan(intruder, 'approved')).rejects.toThrow(/only the supervisor/)
+    await expect(harness.service.assignTask(intruder, {
+      taskId: TASK,
+      writeScope: ['src'],
+      acceptanceCriteria: 'done',
+    })).rejects.toThrow(/only the supervisor/)
+    expect(harness.service.state(harness.supervisor).approval).toBeUndefined()
+    expect(harness.service.state(harness.supervisor).tasks).toEqual([])
+    await harness.service.approvePlan(harness.supervisor, 'approved')
+    expect(harness.service.state(harness.supervisor).approval).toBe('approved')
+  })
+})
+
 describe('ORC delegated results', () => {
   it('ignores child output until the run, task, stage, and role match', async () => {
     const harness = await setup()
@@ -888,6 +928,20 @@ describe('ORC resume and later gates', () => {
     await harness.service.settleTask(lead, { taskId: TASK, leadNodeId: leadLaunch.nodeId!, evidence: 'task done' })
     await harness.service.advance(lead, 'task_review')
 
+    const peer = agentFor(harness.ctx, peerLaunch)
+    const reviewShots = harness.fake.oneShot.length
+    await expect(harness.service.requestReview(peer, { scope: 'task', taskId: TASK, signal: SIGNAL })).rejects.toThrow(/only the supervisor/)
+    await expect(harness.service.recordResult(peer, {
+      correlationId: OrcCorrelationId('not-open'),
+      stage: 'codex-review',
+      role: 'review-only',
+      taskId: TASK,
+      status: 'ok',
+      findings: [],
+    })).rejects.toThrow(/only the supervisor/)
+    expect(harness.fake.oneShot).toHaveLength(reviewShots)
+    expect(harness.service.state(harness.supervisor).delegations.some(item => item.kind === 'codex-review')).toBe(false)
+
     const review = await harness.service.requestReview(harness.supervisor, { scope: 'task', taskId: TASK, signal: SIGNAL })
     const reviewShot = harness.fake.oneShot.at(-1)
     expect(reviewShot?.name).toBe(CONFIG.codexReview.subagentProvider)
@@ -905,6 +959,17 @@ describe('ORC resume and later gates', () => {
     })
     expect(harness.service.state(harness.supervisor).delegations.at(-1)?.blocksProgress).toBe(true)
     await harness.service.advance(lead, 'task_audit')
+    const auditShots = harness.fake.oneShot.length
+    await expect(harness.service.requestAudit(peer, { scope: 'task', taskId: TASK, signal: SIGNAL })).rejects.toThrow(/only the supervisor/)
+    await expect(harness.service.recordResult(peer, {
+      correlationId: review.correlationId,
+      stage: 'codex-audit',
+      role: 'audit-only',
+      taskId: TASK,
+      status: 'ok',
+      findings: [],
+    })).rejects.toThrow(/only the supervisor/)
+    expect(harness.fake.oneShot).toHaveLength(auditShots)
     const audit = await harness.service.requestAudit(harness.supervisor, { scope: 'task', taskId: TASK, signal: SIGNAL })
     expect(harness.fake.oneShot.at(-1)?.name).toBe(CONFIG.codexAudit.subagentProvider)
     expect(review.correlationId).not.toBe(audit.correlationId)

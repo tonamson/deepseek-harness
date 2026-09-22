@@ -515,7 +515,7 @@ function install(agent: Agent, ctx: Context): () => void {
 
     register(scoped.tools.register(defineTool({
       name: 'orc_record_result',
-      description: 'Record a delegated result. A Peer may record only its own run. A Lead may record itself or its children.',
+      description: 'Record a DeepSeek node result. A Peer may record only its own run. A Lead may record itself or its children. Codex results are not accepted.',
       parameters: {
         correlation_id: { type: 'string', required: true, description: 'Delegation correlation id.' },
         stage: { type: 'string', required: true, enum: STAGES, description: 'Delegated stage.' },
@@ -543,6 +543,7 @@ function install(agent: Agent, ctx: Context): () => void {
       output: jsonOutput(STATE_SCHEMA),
       async execute(args, exec) {
         const caller = requireAgent(exec.agent, 'orc_record_result')
+        if (args.stage !== 'deepseek-node') throw new OrcToolError('cannot record a codex result', 'ORC_UNAUTHORIZED')
         const correlationId = requiredText(args.correlation_id, 'correlation id')
         const taskId = args.task_id === undefined ? undefined : requiredText(args.task_id, 'task id')
         bindResult(caller, correlationId, taskId)

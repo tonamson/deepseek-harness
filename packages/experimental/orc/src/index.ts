@@ -354,11 +354,13 @@ export class OrcService extends Service {
 
   /**
    * Open the next legal Codex spec or plan run, or return the open one.
-   * @param caller - agent acting for the Supervisor session.
+   * A caller who is not the supervisor is refused before the fold runs.
+   * @param caller - Supervisor agent.
    * @param signal - cancellation before the one-shot run is published.
    * @returns the correlated launch.
    */
   async startSpecPlan(caller: Agent, signal: AbortSignal): Promise<OrcLaunch> {
+    this.requireSupervisorCaller(caller)
     const session = this.sessionFor(caller)
     const state = this.readState(session)
     const runId = this.requireRun(state)
@@ -384,11 +386,13 @@ export class OrcService extends Service {
 
   /**
    * Record an explicit `plan/review` decision. This does not read plan mode.
-   * @param caller - agent acting for the Supervisor session.
+   * A caller who is not the supervisor is refused before the fold runs.
+   * @param caller - Supervisor agent.
    * @param decision - approved or rejected.
    * @returns the projected run.
    */
   async approvePlan(caller: Agent, decision: 'approved' | 'rejected'): Promise<OrcState> {
+    this.requireSupervisorCaller(caller)
     const session = this.sessionFor(caller)
     return this.commit(session, {
       type: 'orc/plan/approval',
@@ -398,7 +402,8 @@ export class OrcService extends Service {
 
   /**
    * Assign one implementation task while approval is still open.
-   * @param caller - agent acting for the Supervisor session.
+   * A caller who is not the supervisor is refused before the fold runs.
+   * @param caller - Supervisor agent.
    * @param input - task id, write scope, and acceptance criteria.
    * @returns the projected run.
    */
@@ -407,6 +412,7 @@ export class OrcService extends Service {
     readonly writeScope: readonly string[]
     readonly acceptanceCriteria: string
   }): Promise<OrcState> {
+    this.requireSupervisorCaller(caller)
     const session = this.sessionFor(caller)
     return this.commit(session, {
       type: 'orc/task/assigned',
@@ -541,31 +547,37 @@ export class OrcService extends Service {
 
   /**
    * Open a Codex review run, or return the open one for this scope.
-   * @param caller - agent acting for the Supervisor session.
+   * A caller who is not the supervisor is refused before the fold runs.
+   * @param caller - Supervisor agent.
    * @param input - task or branch scope.
    * @returns the correlated launch.
    */
-  requestReview(caller: Agent, input: OrcReportRequest): Promise<OrcLaunch> {
+  async requestReview(caller: Agent, input: OrcReportRequest): Promise<OrcLaunch> {
+    this.requireSupervisorCaller(caller)
     return this.requestReport(caller, input, 'codex-review')
   }
 
   /**
    * Open a Codex audit run, or return the open one for this scope.
-   * @param caller - agent acting for the Supervisor session.
+   * A caller who is not the supervisor is refused before the fold runs.
+   * @param caller - Supervisor agent.
    * @param input - task or branch scope.
    * @returns the correlated launch.
    */
-  requestAudit(caller: Agent, input: OrcReportRequest): Promise<OrcLaunch> {
+  async requestAudit(caller: Agent, input: OrcReportRequest): Promise<OrcLaunch> {
+    this.requireSupervisorCaller(caller)
     return this.requestReport(caller, input, 'codex-audit')
   }
 
   /**
    * Append a delegated result after the log row matches the expected run.
-   * @param caller - agent acting for the Supervisor session.
+   * A Codex stage is refused unless the caller is the supervisor. That check runs before correlation matching.
+   * @param caller - Supervisor for a Codex result, or the node recording a DeepSeek outcome.
    * @param input - correlation, stage, role, task, and result fields.
    * @returns the projected run.
    */
   async recordResult(caller: Agent, input: OrcResultInput): Promise<OrcState> {
+    if (input.stage !== 'deepseek-node') this.requireSupervisorCaller(caller)
     const session = this.sessionFor(caller)
     const found = this.registration(caller, input.correlationId)
     if (found === undefined) throw new OrcError('unknown correlation id')
@@ -637,6 +649,11 @@ export class OrcService extends Service {
       type: 'orc/run/failed',
       data: { version: 1, runId: this.requireRun(this.readState(session)), actorNodeId: OrcNodeId(actor.id), reason },
     })
+  }
+
+  /** Refuse spec, approval, assignment, review, audit, and Codex results from anyone but the Supervisor. */
+  private requireSupervisorCaller(caller: Agent): void {
+    if (this.roleOf(caller) !== 'supervisor') throw new OrcError('only the supervisor may perform this operation')
   }
 
   private callerAgent(caller: Agent): Agent {

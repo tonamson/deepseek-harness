@@ -25,7 +25,7 @@ kind: "package-library"
 <a id="use-this-package"></a>
 ## 使用本包
 
-对版本 1 事件调用 `projectOrc` 或 `applyOrc`。`emptyOrcState` 是 `orc/workflow/created` 之前的状态。被拒绝的事件设置 `failure`，并保持其余字段不变。`OrcService` 在追加前询问该折叠，然后用 `ctx.subagents.startContinuable` 启动可继续的 DeepSeek 子运行，或用 `ctx.subagents.start` 启动 Codex 一次性运行。Codex 启动不传 `outputSchema` 与 `maxDepth`。`renderCodexEnvelope` 用已记录的信封和本次运行的 `blockingSeverities` 生成这段文本；它从配置复制 provider、model 与 effort，并写明只读规则。原生 Codex 子运行不继承 DSH skills 或上下文。角色是 `supervisor`、`lead` 与 `peer`。合法边只有 Supervisor 到 Lead，以及 Lead 到 Peer。Peer 不能创建子节点。Codex 不是角色节点；spec、plan、review 与 audit 是带关联 id 的委托。
+对版本 1 事件调用 `projectOrc` 或 `applyOrc`。`emptyOrcState` 是 `orc/workflow/created` 之前的状态。被拒绝的事件设置 `failure`，并保持其余字段不变。`OrcService` 在追加前询问该折叠，然后用 `ctx.subagents.startContinuable` 启动可继续的 DeepSeek 子运行，或用 `ctx.subagents.start` 启动 Codex 一次性运行。Codex 启动不传 `outputSchema` 与 `maxDepth`。`renderCodexEnvelope` 用已记录的信封和本次运行的 `blockingSeverities` 生成这段文本；它从配置复制 provider、model 与 effort，并写明只读规则。原生 Codex 子运行不继承 DSH skills 或上下文。角色是 `supervisor`、`lead` 与 `peer`。合法边只有 Supervisor 到 Lead，以及 Lead 到 Peer。不是 supervisor 的调用方会在 spec、计划批准、任务分配、review、audit 以及 Codex `recordResult` 开始时被拒绝。Peer 不能创建子节点。Codex 不是角色节点；spec、plan、review 与 audit 是带关联 id 的委托。
 
 工作流阶段为 `brainstorming`、`spec_required`、`plan_required`、`awaiting_user_approval`、`task_implementation`、`task_peer_settlement`、`task_review`、`task_audit`、`task_fix`、`next_task`、`final_review`、`complete` 与 `failed`。计划批准只来自 source 为 `plan/review` 的 `orc/plan/approval`。阻断严重级别来自 `orc/workflow/created`。载荷必须包含 `critical`、`high` 与 `medium`；一次运行还可以列入 `low` 或 `info`。非 `ok` 的 review 或 audit 结果阻止推进。当前迭代上的阻断发现项必须先进入 `task_fix`，然后才能进入 `next_task` 或 `final_review`。解决发现项不会清除该委托上的阻断标记。
 

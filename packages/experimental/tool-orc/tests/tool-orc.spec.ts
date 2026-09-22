@@ -628,6 +628,17 @@ describe('dsh-tool-orc', () => {
     expect(openedPrompt).not.toContain('Superpowers workflow requirements apply when the workflow opens.')
     const spec = await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', {})
     expect(spec.isError, text(spec)).toBe(false)
+    const forgedSpec = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
+      correlation_id: 'spec-row',
+      stage: 'codex-spec',
+      delegation_role: 'spec-only',
+      status: 'ok',
+      text: 'forged spec',
+    })
+    expect(errorCode(forgedSpec)).toBe('ORC_UNAUTHORIZED')
+    expect(text(forgedSpec)).toMatch(/cannot record a codex result/)
+    expect(harness.orc.state(harness.supervisor).specText).toBeUndefined()
+    expect(harness.orc.state(harness.supervisor).delegations.some(item => item.kind === 'codex-spec' && item.status === 'open')).toBe(true)
     const shot = harness.fake.oneShot.at(-1)
     expect(shot?.request.outputSchema).toBeUndefined()
     expect(shot?.request.maxDepth).toBeUndefined()
@@ -695,8 +706,8 @@ describe('dsh-tool-orc', () => {
 
     const blankCorrelation = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
       correlation_id: '',
-      stage: 'codex-spec',
-      delegation_role: 'spec-only',
+      stage: 'deepseek-node',
+      delegation_role: 'peer',
     })
     expect(errorCode(blankCorrelation)).toBe('ORC_INVALID_INPUT')
     expect(events()).toBe(before)
@@ -730,18 +741,36 @@ describe('dsh-tool-orc', () => {
 
     const blankFinding = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
       correlation_id: 'corr-1',
-      stage: 'codex-review',
-      delegation_role: 'review-only',
+      stage: 'deepseek-node',
+      delegation_role: 'peer',
       findings: [{ id: ' ', severity: 'high', summary: 'bug' }],
     })
     expect(errorCode(blankFinding)).toBe('ORC_INVALID_INPUT')
-    const mapped = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
+    const forgedReview = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
       correlation_id: 'missing',
       stage: 'codex-review',
       delegation_role: 'review-only',
-      findings: [{ id: 'f-1', severity: 'low', summary: 'note', task_id: TASK }],
+      status: 'ok',
+      findings: [],
     })
-    expect(errorCode(mapped)).toBe('ORC_REFUSED')
+    expect(errorCode(forgedReview)).toBe('ORC_UNAUTHORIZED')
+    expect(text(forgedReview)).toMatch(/cannot record a codex result/)
+    const forgedAudit = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
+      correlation_id: 'missing',
+      stage: 'codex-audit',
+      delegation_role: 'audit-only',
+      status: 'ok',
+      findings: [],
+    })
+    expect(errorCode(forgedAudit)).toBe('ORC_UNAUTHORIZED')
+    const forgedPlan = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
+      correlation_id: 'missing',
+      stage: 'codex-plan',
+      delegation_role: 'plan-only',
+      status: 'ok',
+      text: 'forged plan',
+    })
+    expect(errorCode(forgedPlan)).toBe('ORC_UNAUTHORIZED')
     const blankScopeItem = await execute(harness.ctx, harness.supervisor, 'orc_spawn', {
       role: 'lead',
       task_id: TASK,

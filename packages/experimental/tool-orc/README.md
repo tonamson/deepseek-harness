@@ -48,7 +48,7 @@ The catalog is one list for every role:
 
 - **Open and supervise** — `orc_create_workflow`, `orc_request_spec_plan`, `orc_record_plan_decision`, `orc_assign_task`, `orc_request_review`, `orc_request_audit`, `orc_advance`, and `orc_fail`.
 - **Create and settle** — `orc_spawn`, `orc_start_task`, and `orc_settle_task`.
-- **Report** — `orc_record_result` and `orc_record_fix`.
+- **Report** — `orc_record_result` records a DeepSeek node only. Codex spec, plan, review, and audit results are not a model tool. `orc_record_fix` records a fix decision.
 
 `orc_record_plan_decision` records a `plan/review` decision the caller already passes. It has no default of `approved`. Review and audit are separate tools. A malformed or missing Codex result stays a service failure.
 

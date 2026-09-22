@@ -48,7 +48,7 @@ kind: "package-reference"
 
 - **打开并监督** — `orc_create_workflow`、`orc_request_spec_plan`、`orc_record_plan_decision`、`orc_assign_task`、`orc_request_review`、`orc_request_audit`、`orc_advance` 与 `orc_fail`。
 - **创建并结算** — `orc_spawn`、`orc_start_task` 与 `orc_settle_task`。
-- **报告** — `orc_record_result` 与 `orc_record_fix`。
+- **报告** — `orc_record_result` 只记录 DeepSeek 节点。Codex 的 spec、plan、review 与 audit 结果不是模型工具。`orc_record_fix` 记录修复决定。
 
 `orc_record_plan_decision` 记录调用方已经传入的 `plan/review` 决定。它不会默认写成 `approved`。review 与 audit 是两个工具。畸形或缺失的 Codex 结果仍是服务失败。
 
