@@ -3,3 +3,5 @@
 - insert:
     - id: subagent-codex
       name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        model: gpt-5.6-luna
