@@ -1,5 +1,21 @@
 # Optional Profile Bundle: register the Codex provider on the Host plane only.
 # Agent Presets grant the model-facing tool independently.
 - insert:
-    - id: subagent-codex
+    - id: subagent-codex-review
       name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        providerName: codex-review
+        model: gpt-5.6-luna
+        reasoningEffort: high
+    - id: subagent-codex-audit
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        providerName: codex-audit
+        model: gpt-5.6-luna
+        reasoningEffort: xhigh
+    - id: subagent-codex-spec
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        providerName: codex-spec
+        model: gpt-5.6-terra
+        reasoningEffort: high

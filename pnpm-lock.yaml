@@ -10854,8 +10854,8 @@ importers:
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
       '@openai/codex':
-        specifier: 0.153.4
-        version: 0.153.4
+        specifier: 0.155.1
+        version: 0.155.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
