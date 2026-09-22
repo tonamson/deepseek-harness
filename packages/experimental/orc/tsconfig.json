@@ -9,6 +9,12 @@
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../util/brand" },
+    { "path": "../../llm/llm" },
+    { "path": "../../core/session" },
+    { "path": "../../core/agent" },
+    { "path": "../../subagent/subagent" },
+    { "path": "../../session/session-persistence" },
+    { "path": "../../session/session-projection" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }
