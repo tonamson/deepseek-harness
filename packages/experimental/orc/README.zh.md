@@ -29,7 +29,7 @@ kind: "package-library"
 
 工作流阶段为 `brainstorming`、`spec_required`、`plan_required`、`awaiting_user_approval`、`task_implementation`、`task_peer_settlement`、`task_review`、`task_audit`、`task_fix`、`next_task`、`final_review`、`complete` 与 `failed`。计划批准只来自 source 为 `plan/review` 的 `orc/plan/approval`。阻断严重级别来自 `orc/workflow/created`。载荷必须包含 `critical`、`high` 与 `medium`；一次运行还可以列入 `low` 或 `info`。非 `ok` 的 review 或 audit 结果阻止推进。当前迭代上的阻断发现项必须先进入 `task_fix`，然后才能进入 `next_task` 或 `final_review`。解决发现项不会清除该委托上的阻断标记。
 
-每个 `orc/phase` 事件都写出 `actorNodeId`。缺少行动者会被拒绝，Peer 不能推进工作流。Supervisor 与 Lead 可以。阻断性的分支发现项写出其任务 id。在 `final_review` 中，该行动者把被点名的任务移回 `task_fix`，折叠将该任务的修复迭代加一。缺失或畸形的分支结果仍然阻止完成，并且不算干净。`low` 与 `info` 发现项不阻断，除非该次运行把它们列入 `blockingSeverities`。
+每个 `orc/phase`、`orc/run/completed` 与 `orc/run/failed` 事件都写出 `actorNodeId`。缺少行动者会被拒绝，Peer 不能推进工作流。Lead 只能走任务内的边：实现、Peer 结算、review、audit 与修复。任务排序、最终审查与终态完成只属于 Supervisor。阻断性的分支发现项写出其任务 id。Supervisor 把该任务移回 `task_fix`，并在回到 review 之前由 `orc/fix/iteration` 记录下一次迭代。一次 `final_review` 只接受一对分支 review 与 audit；仅当最近一次结果为 failed、malformed 或 unavailable 时才允许重试。修复循环返回之后的下一次访问只按那一对新结果判断。缺失或畸形的分支结果仍然阻止完成，并且不算干净。`low` 与 `info` 发现项不阻断，除非该次运行把它们列入 `blockingSeverities`。
 
 事件名与载荷版本保持为版本 1。本包不迁移、改写或删除已发布的会话数据，也不导入 `team/*` 事件。
 
@@ -79,7 +79,7 @@ kind: "package-library"
 
 - **没有编排服务** — 调用方在本包之外追加事件并执行生成、review 与 audit。折叠只接受或拒绝给定的日志。
 - **会话事件表** — `orc/*` 不属于已发布的 `SessionEventMap`。伴随模块只在会话追加这些类型时看到它们；本包不改变会话格式版本。
-- **每次重开一个任务** — 一次前往 `task_fix` 的 `orc/phase` 只重开被点名的任务。完成仍要等待之后一次干净的分支 review 与 audit。
+- **每次重开一个任务** — 一次前往 `task_fix` 的 `orc/phase` 只重开被点名的任务。`orc/fix/iteration` 在回到 review 之前记录这次修复。完成要等待下一次 `final_review` 访问中干净的分支一对结果。
 - **阈值下限** — 一次运行可以把 `low` 或 `info` 加入阻断集合，但不能省略 `critical`、`high` 或 `medium`。
 
 <a id="dev-note"></a>

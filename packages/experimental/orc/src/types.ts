@@ -166,6 +166,11 @@ export interface OrcState {
   readonly specText?: string
   readonly planText?: string
   readonly terminalReason?: string
+  /**
+   * Final-review visit, starting at 0 on the first entry and increasing on each return.
+   * Branch report iterations must match this visit.
+   */
+  readonly branchVisit?: number
   readonly failure?: string
 }
 
@@ -340,7 +345,8 @@ export interface OrcFixIteration {
 
 /**
  * Version-1 guarded phase transition.
- * `actorNodeId` is the Supervisor or Lead advancing the workflow. A Peer cannot.
+ * `actorNodeId` is the node advancing the workflow. A Peer cannot.
+ * A Lead may take only the task-local edges. Sequencing, final review, and completion stay with the Supervisor.
  */
 export interface OrcPhaseTransition {
   readonly version: 1
@@ -350,17 +356,19 @@ export interface OrcPhaseTransition {
   readonly taskId?: OrcTaskId
 }
 
-/** Version-1 terminal failure. */
+/** Version-1 terminal failure. Only the Supervisor may record it. */
 export interface OrcRunFailed {
   readonly version: 1
   readonly runId: OrcRunId
+  readonly actorNodeId: OrcNodeId
   readonly reason: string
 }
 
-/** Version-1 terminal completion. */
+/** Version-1 terminal completion. Only the Supervisor may record it. */
 export interface OrcRunCompleted {
   readonly version: 1
   readonly runId: OrcRunId
+  readonly actorNodeId: OrcNodeId
 }
 
 /** Version-1 ORC payloads keyed by event type. */

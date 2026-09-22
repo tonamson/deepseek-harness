@@ -303,12 +303,14 @@ const phaseSchema = z.object({
 const runFailedSchema = z.object({
   version: z.literal(1),
   runId: runIdSchema,
+  actorNodeId: nodeIdSchema,
   reason: z.string().min(1),
 }).strict()
 
 const runCompletedSchema = z.object({
   version: z.literal(1),
   runId: runIdSchema,
+  actorNodeId: nodeIdSchema,
 }).strict()
 
 const orcEventSchema: z.ZodType<OrcEvent> = z.discriminatedUnion('type', [
@@ -376,8 +378,9 @@ function parseOrcEvent(event: unknown): OrcEvent | string {
   const version = declaredVersion(event)
   if (version !== undefined && version !== 1) return `unsupported ORC event version ${String(version)}`
   if (isRecord(event) && typeof event.type === 'string' && !isOrcEventType(event.type)) return 'not an orc event'
-  if (isRecord(event) && event.type === 'orc/phase' && isRecord(event.data) && event.data.actorNodeId === undefined) {
-    return 'phase actor is required'
+  if (isRecord(event) && isRecord(event.data) && event.data.actorNodeId === undefined) {
+    if (event.type === 'orc/phase') return 'phase actor is required'
+    if (event.type === 'orc/run/completed' || event.type === 'orc/run/failed') return 'run actor is required'
   }
   const parsed = orcEventSchema.safeParse(event)
   if (!parsed.success) return `malformed ORC payload: ${parsed.error.issues.map(issue => issue.message).join('; ')}`
@@ -502,6 +505,9 @@ function createNode(state: OrcState, event: Extract<OrcEvent, { type: 'orc/node/
   if (task === undefined) return refuse(state, 'task is not assigned')
   if (data.role === 'lead') {
     if (task.phase !== 'assigned') return refuse(state, 'task is not waiting for a lead')
+    if (state.tasks.some(item => item.id !== task.id && taskInFlight(item))) {
+      return refuse(state, 'another task is in flight')
+    }
     if (state.nodes.some(node => node.role === 'lead' && node.phase === 'active')) {
       return refuse(state, 'a lead is already active')
     }
@@ -542,7 +548,7 @@ function createNode(state: OrcState, event: Extract<OrcEvent, { type: 'orc/node/
   return { ...state, nodes: [...state.nodes, node], delegations: [...state.delegations, delegation] }
 }
 
-/** Record a node outcome. A non-settled Peer leaves its task unsettled; a non-settled Lead fails the task. */
+/** Record a node outcome. `failed` fails the task. Timeout, cancellation, and incomplete evidence leave it unsettled. */
 function settleNode(state: OrcState, event: Extract<OrcEvent, { type: 'orc/node/settled' }>): OrcState {
   const data = event.data
   const invalid = requireMutableRun(state, data.runId)
@@ -565,7 +571,10 @@ function settleNode(state: OrcState, event: Extract<OrcEvent, { type: 'orc/node/
       : item),
   }
   if (node.taskId !== undefined && !settled) {
-    next = mapTask(next, node.taskId, task => ({ ...task, phase: node.role === 'lead' ? 'failed' : 'unsettled' }))
+    next = mapTask(next, node.taskId, (task) => {
+      if (task.phase === 'failed') return task
+      return { ...task, phase: data.outcome === 'failed' ? 'failed' : 'unsettled' }
+    })
   }
   return next
 }
@@ -683,6 +692,9 @@ function startTask(state: OrcState, event: Extract<OrcEvent, { type: 'orc/task/s
   if (state.phase !== 'task_implementation') return refuse(state, 'task start requires task implementation')
   const task = taskById(state, data.taskId)
   if (task === undefined || task.phase !== 'assigned') return refuse(state, 'task is not assigned')
+  if (state.tasks.some(item => item.id !== task.id && taskInFlight(item))) {
+    return refuse(state, 'another task is in flight')
+  }
   const lead = nodeById(state, data.leadNodeId)
   if (lead === undefined || lead.role !== 'lead' || lead.taskId !== task.id || lead.phase !== 'active') {
     return refuse(state, 'lead does not own the task')
@@ -703,6 +715,7 @@ function settleTask(state: OrcState, event: Extract<OrcEvent, { type: 'orc/task/
   if (invalid !== undefined) return invalid
   const task = taskById(state, data.taskId)
   if (task === undefined) return refuse(state, 'task is not assigned')
+  if (state.activeTaskId !== task.id) return refuse(state, 'task settlement requires the active task')
   const lead = nodeById(state, data.leadNodeId)
   if (lead === undefined || lead.role !== 'lead' || lead.taskId !== task.id) {
     return refuse(state, 'lead does not own the task')
@@ -736,6 +749,13 @@ function requestReport(
   let taskId = data.taskId
   if (data.scope === 'branch') {
     if (taskId !== undefined) return refuse(state, `branch ${label} request cannot name a task`)
+    if (state.branchVisit === undefined || data.iteration !== state.branchVisit) {
+      return refuse(state, 'branch request iteration does not match this final review')
+    }
+    const latest = latestBranch(state, kind)
+    if (latest !== undefined && (latest.status === 'open' || latest.status === 'ok')) {
+      return refuse(state, `branch ${label} is already requested`)
+    }
     taskId = undefined
   } else {
     const task = activeTask(state)
@@ -743,9 +763,9 @@ function requestReport(
       return refuse(state, `${label} request task does not match the active task`)
     }
     if (data.iteration !== task.iteration) return refuse(state, `${label} request iteration does not match the task`)
-  }
-  if (findReport(state, kind, data.scope, data.iteration, taskId) !== undefined) {
-    return refuse(state, `${label} is already requested`)
+    if (findReport(state, kind, data.scope, data.iteration, taskId) !== undefined) {
+      return refuse(state, `${label} is already requested`)
+    }
   }
   const delegation: OrcDelegation = {
     correlationId: data.correlationId,
@@ -867,10 +887,10 @@ function changePhase(state: OrcState, event: Extract<OrcEvent, { type: 'orc/phas
   const data = event.data
   const invalid = requireMutableRun(state, data.runId)
   if (invalid !== undefined) return invalid
-  const actorBlock = phaseActorBlock(state, data.actorNodeId)
-  if (actorBlock !== undefined) return refuse(state, actorBlock)
   const from = state.phase
   if (from === undefined) return refuse(state, 'supervisor root is required')
+  const actorBlock = phaseActorBlock(state, data.actorNodeId, from, data.to)
+  if (actorBlock !== undefined) return refuse(state, actorBlock)
   if (!legalPhaseEdge(from, data.to)) return refuse(state, `illegal phase jump from ${from} to ${data.to}`)
   const blocked = phaseBlock(state, from, data.to, data.taskId)
   if (blocked !== undefined) return refuse(state, blocked)
@@ -886,6 +906,8 @@ function failRun(state: OrcState, event: Extract<OrcEvent, { type: 'orc/run/fail
   if (invalid !== undefined) return invalid
   if (state.phase === 'failed') return refuse(state, 'run has failed')
   if (state.phase === 'complete') return refuse(state, 'run is complete')
+  const actorBlock = supervisorActorBlock(state, event.data.actorNodeId, 'lead cannot fail the run')
+  if (actorBlock !== undefined) return refuse(state, actorBlock)
   return { ...state, phase: 'failed', terminalReason: event.data.reason }
 }
 
@@ -893,14 +915,16 @@ function failRun(state: OrcState, event: Extract<OrcEvent, { type: 'orc/run/fail
 function completeRun(state: OrcState, event: Extract<OrcEvent, { type: 'orc/run/completed' }>): OrcState {
   const invalid = requireMutableRun(state, event.data.runId)
   if (invalid !== undefined) return invalid
+  const actorBlock = supervisorActorBlock(state, event.data.actorNodeId, 'lead cannot complete the run')
+  if (actorBlock !== undefined) return refuse(state, actorBlock)
   if (state.phase !== 'final_review') {
     return refuse(state, `illegal phase jump from ${state.phase ?? 'brainstorming'} to complete`)
   }
-  const review = latestDelegation(state, 'codex-review', 'branch')
+  const review = latestBranch(state, 'codex-review')
   const reviewProblem = reportProblem('branch review', review)
   if (reviewProblem !== undefined) return refuse(state, reviewProblem)
   if (review?.blocksProgress === true) return refuse(state, 'blocking findings require fix')
-  const audit = latestDelegation(state, 'codex-audit', 'branch')
+  const audit = latestBranch(state, 'codex-audit')
   const auditProblem = reportProblem('branch audit', audit)
   if (auditProblem !== undefined) return refuse(state, auditProblem)
   if (audit?.blocksProgress === true) return refuse(state, 'blocking findings require fix')
@@ -1043,21 +1067,41 @@ function leaveAudit(state: OrcState, to: OrcWorkflowPhase): string | undefined {
   return undefined
 }
 
-/** Refuse returning to review until this fix loop records a new iteration. */
+/** Refuse returning to review until `orc/fix/iteration` records the next iteration. */
 function leaveFix(state: OrcState): string | undefined {
   const task = activeTask(state)
   if (task === undefined) return 'fix iteration is required before review'
   const audited = latestSettledIteration(state, 'codex-audit', task.id)
-  if (task.iteration <= (audited ?? -1)) return 'fix iteration is required before review'
-  if (task.fixDecision !== undefined || hasBlockingBranchFinding(state, task.id)) return undefined
-  return 'fix iteration is required before review'
+  if (task.fixDecision === undefined || audited === undefined || task.iteration <= audited) {
+    return 'fix iteration is required before review'
+  }
+  return undefined
 }
 
-/** Refuse a phase whose actor is missing or a Peer. Supervisor and Lead may advance. */
-function phaseActorBlock(state: OrcState, actorNodeId: OrcNodeId): string | undefined {
+/** Refuse a Peer, a missing node, or a Lead on an edge the Supervisor owns. */
+function phaseActorBlock(state: OrcState, actorNodeId: OrcNodeId, from: OrcWorkflowPhase, to: OrcWorkflowPhase): string | undefined {
   const actor = nodeById(state, actorNodeId)
   if (actor === undefined) return 'phase actor is missing'
   if (actor.role === 'peer') return 'peer cannot advance the workflow'
+  if (actor.role === 'lead' && !taskLocalEdge(from, to)) return 'lead cannot advance this phase'
+  return undefined
+}
+
+/** Task implementation, settlement, review, audit, and the fix loop. Sequencing is not included. */
+function taskLocalEdge(from: OrcWorkflowPhase, to: OrcWorkflowPhase): boolean {
+  return (from === 'task_implementation' && to === 'task_peer_settlement')
+    || (from === 'task_peer_settlement' && to === 'task_review')
+    || (from === 'task_review' && to === 'task_audit')
+    || (from === 'task_audit' && to === 'task_fix')
+    || (from === 'task_fix' && to === 'task_review')
+}
+
+/** Terminal and sequencing events belong to the Supervisor. */
+function supervisorActorBlock(state: OrcState, actorNodeId: OrcNodeId, leadMessage: string): string | undefined {
+  const actor = nodeById(state, actorNodeId)
+  if (actor === undefined) return 'run actor is missing'
+  if (actor.role === 'peer') return 'peer cannot advance the workflow'
+  if (actor.role !== 'supervisor') return leadMessage
   return undefined
 }
 
@@ -1079,14 +1123,10 @@ function hasBlockingBranchFinding(state: OrcState, taskId: OrcTaskId): boolean {
   })
 }
 
-/** Return one task to fix and increment its iteration. */
+/** Return one task to fix. `orc/fix/iteration` records the next iteration. */
 function commitBranchReopen(state: OrcState, taskId: OrcTaskId): OrcState {
   return {
-    ...mapTask(state, taskId, task => ({
-      ...task,
-      phase: 'fix',
-      iteration: task.iteration + 1,
-    })),
+    ...mapTask(state, taskId, task => ({ ...task, phase: 'fix' })),
     phase: 'task_fix',
     activeTaskId: taskId,
   }
@@ -1111,7 +1151,14 @@ function reportProblem(label: string, delegation: OrcDelegation | undefined): st
 /** Commit a phase, updating the active task when the edge owns that change. */
 function commitPhase(state: OrcState, to: OrcWorkflowPhase): OrcState {
   const task = activeTask(state)
-  if (task !== undefined && (to === 'next_task' || to === 'final_review')) {
+  if (to === 'final_review') {
+    const cleaned = task === undefined
+      ? state
+      : mapTask(state, task.id, current => ({ ...current, phase: 'clean' }))
+    const { activeTaskId: _activeTaskId, ...rest } = cleaned
+    return { ...rest, phase: 'final_review', branchVisit: (state.branchVisit ?? -1) + 1 }
+  }
+  if (task !== undefined && to === 'next_task') {
     const { activeTaskId: _activeTaskId, ...rest } = mapTask(state, task.id, current => ({ ...current, phase: 'clean' }))
     return { ...rest, phase: to }
   }
@@ -1145,6 +1192,21 @@ function nodeById(state: OrcState, nodeId: OrcNodeId): OrcNode | undefined {
 /** Find one delegation by correlation id. */
 function delegationByCorrelation(state: OrcState, correlationId: OrcCorrelationId): OrcDelegation | undefined {
   return state.delegations.find(item => item.correlationId === correlationId)
+}
+
+/** Last branch report of one kind in the current final-review visit. */
+function latestBranch(state: OrcState, kind: 'codex-review' | 'codex-audit'): OrcDelegation | undefined {
+  if (state.branchVisit === undefined) return undefined
+  let found: OrcDelegation | undefined
+  for (const item of state.delegations) {
+    if (item.kind === kind && item.scope === 'branch' && item.iteration === state.branchVisit) found = item
+  }
+  return found
+}
+
+/** A task that has left assignment and is neither clean nor failed. */
+function taskInFlight(task: OrcTask): boolean {
+  return task.phase !== 'assigned' && task.phase !== 'clean' && task.phase !== 'failed'
 }
 
 /** Last delegation of one kind, optionally limited to a review scope. */

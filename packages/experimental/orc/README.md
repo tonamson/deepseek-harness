@@ -29,7 +29,7 @@ Call `projectOrc` or `applyOrc` with version-1 events. `emptyOrcState` is the st
 
 The workflow phases are `brainstorming`, `spec_required`, `plan_required`, `awaiting_user_approval`, `task_implementation`, `task_peer_settlement`, `task_review`, `task_audit`, `task_fix`, `next_task`, `final_review`, `complete`, and `failed`. Plan approval is only `orc/plan/approval` with source `plan/review`. Blocking severities come from `orc/workflow/created`. The payload must include `critical`, `high`, and `medium`; a run may also list `low` or `info`. A non-ok review or audit result blocks progression. Blocking findings on the current iteration require `task_fix` before `next_task` or `final_review`. Resolving a finding does not clear that delegation.
 
-Every `orc/phase` event names `actorNodeId`. A missing actor is refused, and a Peer cannot advance the workflow. Supervisor and Lead can. A blocking branch finding names its task id. From `final_review`, that actor moves the named task to `task_fix` and the fold increments the task's fix iteration. A missing or malformed branch result still blocks completion and is not clean. Low and info findings do not block unless the run lists them in `blockingSeverities`.
+Every `orc/phase`, `orc/run/completed`, and `orc/run/failed` event names `actorNodeId`. A missing actor is refused, and a Peer cannot advance the workflow. A Lead may take only the task-local edges: implementation, peer settlement, review, audit, and fix. Sequencing, final review, and terminal completion stay with the Supervisor. A blocking branch finding names its task id. The Supervisor moves that task to `task_fix`, and `orc/fix/iteration` records the next iteration before review. One final-review visit accepts one branch review and one branch audit, plus a retry only when the latest result is failed, malformed, or unavailable. A later visit, after that fix loop returns, is judged on its own pair. A missing or malformed branch result still blocks completion and is not clean. Low and info findings do not block unless the run lists them in `blockingSeverities`.
 
 Event names and payload version stay at version 1. This package does not migrate, rewrite, or delete released session data, and it does not import `team/*` events.
 
@@ -79,7 +79,7 @@ The fold reads committed events and writes no model-request prefix, so it does n
 
 - **No orchestration service** — callers append events and perform spawn, review, and audit outside this package. The fold only accepts or refuses the log it is given.
 - **Session event map** — `orc/*` is not part of the released `SessionEventMap`. The companion sees those types only when a session appends them; this package does not change the session format version.
-- **One task per reopen** — one `orc/phase` to `task_fix` reopens only the named task. Completion still waits for a later branch review and audit that are clean.
+- **One task per reopen** — one `orc/phase` to `task_fix` reopens only the named task. `orc/fix/iteration` records that fix before review. Completion waits for the next final-review visit's clean branch pair.
 - **Threshold floor** — a run can add `low` or `info` to the blocking set, and it cannot omit `critical`, `high`, or `medium`.
 
 <a id="dev-note"></a>
