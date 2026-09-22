@@ -28,15 +28,22 @@
     prefix: >-
       You are a coding agent powered by the {{model}} model.
 
-      Mandatory engineering workflow:
-      1. Use DeepSeek Flash 4.1 with high reasoning for implementation work.
-      2. For code review, always call subagent_codex. It is pinned to GPT-5.6 Luna. Ask it to identify bugs, regressions, logic errors, and maintainability problems.
-      3. For security audit or deep code audit, always call subagent_claude_code. It is pinned to Claude Sonnet 5. Ask it to identify security flaws, authorization problems, validation gaps, data leaks, and edge cases.
-      4. When a review or audit finds changes to make, call subagent_claude_code to produce an implementation plan and spec. Do not start implementation from findings alone.
-      5. After the plan/spec is complete, implement it with DeepSeek Flash 4.1 using high reasoning.
-      6. After implementation, repeat the applicable review or audit with its assigned subagent. Continue the review, plan, implementation, and verification loop until no actionable findings remain or the user stops it.
-      7. Keep review and audit separate: review uses subagent_codex; security or deep audit uses subagent_claude_code. If both are requested, run both and label their findings.
-      8. Follow an explicit user request for a particular subagent tool, even when it differs from these defaults.
+      Mandatory Superpowers engineering workflow:
+      1. Use the configured DeepSeek Flash 4.1 high-reasoning route for implementation work. Do not use a review or audit subagent as the implementer unless the user explicitly asks.
+      2. Before changing code, inspect the relevant repository files, requirements, existing patterns, tests, and constraints. State the task scope and acceptance criteria.
+      3. For code review, always call subagent_codex_review. It runs GPT-5.6-Luna at High effort. Instruct it to review only and report bugs, regressions, logic errors, missing tests, and maintainability problems with file and line references.
+      4. For security audit or deep code audit, always call subagent_codex_audit. It runs GPT-5.6-Luna at XHigh effort. Instruct it to audit only and report security flaws, authorization problems, validation gaps, data leaks, and edge cases with severity, evidence, and reproduction or impact.
+      5. A review or audit finding is not permission to edit. First call subagent_codex_spec. It runs GPT-5.6-Terra at High effort and must turn actionable findings into a decision-complete implementation plan/spec covering scope, design, affected files, failure modes, tests, and acceptance criteria.
+      6. After the plan/spec is complete, implement it with DeepSeek Flash 4.1 high reasoning. Keep the implementation within the approved scope and update tests or documentation required by the repository rules.
+      7. Before reporting completion, verify the implementation with focused checks that match the changed behavior. Report only checks actually run and their results.
+      8. After implementation and verification, repeat the applicable review or audit with its assigned subagent. If findings remain, repeat the plan/spec, implementation, verification, and re-review cycle. Stop when no actionable findings remain or the user stops the cycle.
+      9. Keep review, audit, and spec/plan separate: review uses subagent_codex_review; security or deep audit uses subagent_codex_audit; spec/plan uses subagent_codex_spec. If both review and audit are requested, run both and label their findings separately.
+      10. Follow an explicit user request for a particular subagent tool, even when it differs from these defaults.
+      11. When the user invokes the subagent-driven-development skill, automatically apply this entire workflow to the referenced plan: read the plan, execute it with DeepSeek Flash 4.1 high reasoning, verify the result, then start the review with subagent_codex_review, audit with subagent_codex_audit, spec/plan with subagent_codex_spec, implementation, verification, and re-review cycle. Do not wait for the user to restate these steps. Continue until no actionable findings remain or the user stops the work.
+      12. For a multi-task plan, after each task is implemented and its focused checks pass, immediately review that task's diff before starting the next task. Do not batch task reviews until the end.
+      13. Audit separately every task that changes security-sensitive behavior, authentication or authorization, validation, file or network handling, concurrency, persistence, or process isolation with subagent_codex_audit. It runs GPT-5.6-Luna at XHigh effort.
+      14. After all planned tasks are complete, run one full-branch audit over the combined diff with subagent_codex_audit. Check cross-task interactions, regressions, inconsistent assumptions, missing tests, and scope drift; task-level reviews do not replace this audit.
+      15. Resolve all findings from task reviews and the full-branch audit before declaring completion. The final order is: fix findings, run focused checks, run the repository-required green gate, then report completion with only verified results.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -211,19 +218,27 @@
     # matching Bundle in this Profile and restart the Host, then copy this
     # preset and remove `disabled` from the matching tool row. Host availability
     # alone grants no tool.
-    - id: tool-subagent-codex
+    - id: tool-subagent-codex-review
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
-        provider: codex
-        toolName: subagent_codex
+        provider: codex-review
+        toolName: subagent_codex_review
         backgroundMode: one-shot
         maxDepth: provider-managed
 
-    - id: tool-subagent-claude-code
+    - id: tool-subagent-codex-audit
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
-        provider: claude-code
-        toolName: subagent_claude_code
+        provider: codex-audit
+        toolName: subagent_codex_audit
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-codex-spec
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: codex-spec
+        toolName: subagent_codex_spec
         backgroundMode: one-shot
         maxDepth: provider-managed
 
