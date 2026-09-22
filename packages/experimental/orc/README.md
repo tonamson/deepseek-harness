@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Call `projectOrc` or `applyOrc` with version-1 events. `emptyOrcState` is the state before `orc/workflow/created`. A refused event sets `failure` and leaves every other field as it was. `OrcService` asks that fold before it appends, then starts a continuable DeepSeek child with `ctx.subagents.startContinuable` or a Codex one-shot with `ctx.subagents.start`. Codex starts omit `outputSchema` and `maxDepth`. Provider, model, and effort come from validated config. Roles are `supervisor`, `lead`, and `peer`. The legal edges are Supervisor to Lead and Lead to Peer. A Peer cannot create a child. Codex is not a role node; spec, plan, review, and audit are correlated delegations.
+Call `projectOrc` or `applyOrc` with version-1 events. `emptyOrcState` is the state before `orc/workflow/created`. A refused event sets `failure` and leaves every other field as it was. `OrcService` asks that fold before it appends, then starts a continuable DeepSeek child with `ctx.subagents.startContinuable` or a Codex one-shot with `ctx.subagents.start`. Codex starts omit `outputSchema` and `maxDepth`. `renderCodexEnvelope` builds that text from the logged envelope and the run's `blockingSeverities`; it copies provider, model, and effort from config and states the read-only rule. Native Codex children do not inherit DSH skills or context. Roles are `supervisor`, `lead`, and `peer`. The legal edges are Supervisor to Lead and Lead to Peer. A Peer cannot create a child. Codex is not a role node; spec, plan, review, and audit are correlated delegations.
 
 The workflow phases are `brainstorming`, `spec_required`, `plan_required`, `awaiting_user_approval`, `task_implementation`, `task_peer_settlement`, `task_review`, `task_audit`, `task_fix`, `next_task`, `final_review`, `complete`, and `failed`. Plan approval is only `orc/plan/approval` with source `plan/review`. Blocking severities come from `orc/workflow/created`. The payload must include `critical`, `high`, and `medium`; a run may also list `low` or `info`. A non-ok review or audit result blocks progression. Blocking findings on the current iteration require `task_fix` before `next_task` or `final_review`. Resolving a finding does not clear that delegation.
 
@@ -44,6 +44,7 @@ Event names and payload version stay at version 1. This package does not migrate
 | [`src/types.ts`](src/types.ts) | Branded ids, phases, and version-1 payloads |
 | [`src/projection.ts`](src/projection.ts) | Zod payloads, `applyOrc`, and `projectOrc` |
 | [`src/invariant.ts`](src/invariant.ts) | Companion that refuses an `orc/*` candidate before append |
+| [`src/envelope.ts`](src/envelope.ts) | `renderCodexEnvelope` text for a native Codex child |
 | [`src/index.ts`](src/index.ts) | Public fold exports and `OrcService` |
 
 `OrcState.failure` is the refusal string. `blockingSeverities` is the run's threshold. Nodes store the role prompt, skill envelope, write scope, acceptance criteria, and reporting format. Delegations store Codex envelopes and report status. `blocksProgress` is fixed when the result is recorded.

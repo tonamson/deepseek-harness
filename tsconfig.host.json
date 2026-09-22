@@ -369,6 +369,7 @@
     { "path": "./packages/jobs/tool-jobs" },
     { "path": "./packages/experimental/agent-team" },
     { "path": "./packages/experimental/orc" },
+    { "path": "./packages/experimental/tool-orc" },
     { "path": "./packages/experimental/agent-team-profile" },
     { "path": "./packages/experimental/tool-agent-team" },
     { "path": "./packages/experimental/agent-team-web-profile" },

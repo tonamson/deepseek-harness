@@ -9,6 +9,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-subagent'
 import { z } from 'zod'
+import { renderCodexEnvelope } from './envelope.ts'
 import {
   applyOrc,
   emptyOrcState,
@@ -47,6 +48,8 @@ export {
   isOrcEventType,
   projectOrc,
 } from './projection.ts'
+export { renderCodexEnvelope } from './envelope.ts'
+export type { OrcCodexEnvelopeText } from './envelope.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -167,6 +170,7 @@ interface LiveContinuation {
 
 /** Thrown when the projection refuses a transition or the service cannot record it. */
 export class OrcError extends Error {
+  /** Stable refusal code. Service and tool results route on this, not on message text. */
   readonly code = 'ORC_REFUSED' as const
 
   /**
@@ -198,31 +202,36 @@ function errorText(error: unknown): string {
 }
 
 function codexPrompt(fields: {
-  readonly role: string
+  readonly role: 'spec-only' | 'plan-only' | 'review-only' | 'audit-only'
+  readonly stage: 'codex-spec' | 'codex-plan' | 'codex-review' | 'codex-audit'
   readonly repositoryPath: string
   readonly skillRequirements: string
   readonly outputSchema: string
   readonly provider: string
   readonly model: string
   readonly effort: string
+  readonly blockingSeverities: readonly string[]
   readonly scope?: string
   readonly taskId?: string
   readonly iteration?: number
 }): ContentBlock[] {
-  const lines = [
-    `role: ${fields.role}`,
-    `repositoryPath: ${fields.repositoryPath}`,
-    `skillRequirements: ${fields.skillRequirements}`,
-    `outputSchema: ${fields.outputSchema}`,
-    'readOnly: true',
-    `provider: ${fields.provider}`,
-    `model: ${fields.model}`,
-    `effort: ${fields.effort}`,
-  ]
-  if (fields.scope !== undefined) lines.push(`scope: ${fields.scope}`)
-  if (fields.taskId !== undefined) lines.push(`taskId: ${fields.taskId}`)
-  if (fields.iteration !== undefined) lines.push(`iteration: ${String(fields.iteration)}`)
-  return [{ type: 'text', text: lines.join('\n') }]
+  return [{
+    type: 'text',
+    text: renderCodexEnvelope({
+      role: fields.role,
+      stage: fields.stage,
+      repositoryScope: fields.repositoryPath,
+      skillWorkflow: fields.skillRequirements,
+      expectedStructuredResult: fields.outputSchema,
+      blockingSeverities: fields.blockingSeverities,
+      provider: fields.provider,
+      model: fields.model,
+      effort: fields.effort,
+      ...(fields.scope === undefined ? {} : { scope: fields.scope }),
+      ...(fields.taskId === undefined ? {} : { taskId: fields.taskId }),
+      ...(fields.iteration === undefined ? {} : { iteration: fields.iteration }),
+    }),
+  }]
 }
 
 /**
@@ -784,12 +793,14 @@ export class OrcService extends Service {
         label: event.data.role,
         prompt: codexPrompt({
           role: event.data.role,
+          stage: event.type === 'orc/spec/requested' ? 'codex-spec' : 'codex-plan',
           repositoryPath: event.data.repositoryPath,
           skillRequirements: event.data.skillRequirements,
           outputSchema: event.data.outputSchema,
           provider: route.provider,
           model: route.model,
           effort: route.effort,
+          blockingSeverities: this.readState(session).blockingSeverities,
         }),
         parent: caller,
         signal,
@@ -865,7 +876,20 @@ export class OrcService extends Service {
     try {
       const run = await this.ctx.subagents.start(route.subagentProvider, {
         label: envelope.role,
-        prompt: codexPrompt({ ...envelope, scope: input.scope, ...(taskId === undefined ? {} : { taskId }), iteration }),
+        prompt: codexPrompt({
+          role: envelope.role,
+          stage: kind,
+          repositoryPath: envelope.repositoryPath,
+          skillRequirements: envelope.skillRequirements,
+          outputSchema: envelope.outputSchema,
+          provider: route.provider,
+          model: route.model,
+          effort: route.effort,
+          blockingSeverities: state.blockingSeverities,
+          scope: input.scope,
+          ...(taskId === undefined ? {} : { taskId }),
+          iteration,
+        }),
         parent: caller,
         signal: input.signal,
       })
