@@ -1,0 +1,587 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import { applyOrc, emptyOrcState, projectOrc } from '../src/projection.ts'
+import {
+  OrcCorrelationId,
+  OrcFindingId,
+  OrcNodeId,
+  OrcRunId,
+  OrcTaskId,
+} from '../src/projection.ts'
+import type {
+  OrcEvent,
+  OrcNodeOutcome,
+  OrcReportStatus,
+  OrcReviewScope,
+  OrcSeverity,
+  OrcState,
+  OrcTaskId as OrcTaskIdentity,
+  OrcWorkflowPhase,
+} from '../src/types.ts'
+
+const RUN = OrcRunId('run-1')
+const SUPERVISOR = OrcNodeId('supervisor')
+const LEAD_A = OrcNodeId('lead-a')
+const PEER_A = OrcNodeId('peer-a')
+const TASK_A = OrcTaskId('task-a')
+const TASK_B = OrcTaskId('task-b')
+
+const BLOCKING = ['critical', 'high', 'medium'] as const
+
+function replay(events: readonly OrcEvent[]): OrcState {
+  const state = projectOrc(events)
+  if (state.failure !== undefined) throw new Error(state.failure)
+  return state
+}
+
+function failure(events: readonly OrcEvent[]): string {
+  const state = events.reduce(applyOrc, emptyOrcState())
+  if (state.failure === undefined) throw new Error('expected the ORC projection to refuse the stream')
+  return state.failure
+}
+
+function workflow(blocking: readonly OrcSeverity[] = BLOCKING): OrcEvent {
+  return {
+    type: 'orc/workflow/created',
+    data: {
+      version: 1,
+      runId: RUN,
+      blockingSeverities: [...blocking],
+      supervisorNodeId: SUPERVISOR,
+      prompt: 'Supervisor prompt',
+      skillEnvelope: 'superpowers',
+      writeScope: ['repo'],
+      acceptanceCriteria: 'run reaches complete',
+      reportingFormat: 'durable events',
+    },
+  }
+}
+
+function specRequested(): OrcEvent {
+  return {
+    type: 'orc/spec/requested',
+    data: {
+      version: 1,
+      runId: RUN,
+      correlationId: OrcCorrelationId('corr-spec'),
+      role: 'spec-only',
+      repositoryPath: '/repo',
+      skillRequirements: 'superpowers spec',
+      outputSchema: 'spec-and-plan',
+      readOnly: true,
+    },
+  }
+}
+
+function specResult(status: OrcReportStatus = 'ok'): OrcEvent {
+  return {
+    type: 'orc/spec/result',
+    data: {
+      version: 1,
+      runId: RUN,
+      correlationId: OrcCorrelationId('corr-spec'),
+      status,
+      ...(status === 'ok' ? { specText: 'design spec' } : {}),
+    },
+  }
+}
+
+function phase(to: OrcWorkflowPhase, taskId?: OrcTaskId): OrcEvent {
+  return {
+    type: 'orc/phase',
+    data: {
+      version: 1,
+      runId: RUN,
+      to,
+      ...(taskId === undefined ? {} : { taskId }),
+    },
+  }
+}
+
+function planRequested(): OrcEvent {
+  return {
+    type: 'orc/plan/requested',
+    data: {
+      version: 1,
+      runId: RUN,
+      correlationId: OrcCorrelationId('corr-plan'),
+      role: 'plan-only',
+      repositoryPath: '/repo',
+      skillRequirements: 'superpowers plan',
+      outputSchema: 'plan',
+      readOnly: true,
+    },
+  }
+}
+
+function planResult(): OrcEvent {
+  return {
+    type: 'orc/plan/result',
+    data: {
+      version: 1,
+      runId: RUN,
+      correlationId: OrcCorrelationId('corr-plan'),
+      status: 'ok',
+      planText: 'implementation plan',
+    },
+  }
+}
+
+function approval(decision: 'approved' | 'rejected'): OrcEvent {
+  return {
+    type: 'orc/plan/approval',
+    data: { version: 1, runId: RUN, decision, source: 'plan/review' },
+  }
+}
+
+function taskAssigned(taskId: OrcTaskId): OrcEvent {
+  return {
+    type: 'orc/task/assigned',
+    data: {
+      version: 1,
+      runId: RUN,
+      taskId,
+      writeScope: ['src'],
+      acceptanceCriteria: `done ${taskId}`,
+    },
+  }
+}
+
+function node(role: 'lead' | 'peer', nodeId: OrcNodeId, parentId: OrcNodeId, taskId: OrcTaskId, correlationId: string): OrcEvent {
+  return {
+    type: 'orc/node/created',
+    data: {
+      version: 1,
+      runId: RUN,
+      nodeId,
+      parentId,
+      role,
+      taskId,
+      correlationId: OrcCorrelationId(correlationId),
+      prompt: `${role} prompt`,
+      skillEnvelope: 'superpowers',
+      writeScope: ['src'],
+      acceptanceCriteria: 'report evidence',
+      reportingFormat: 'settlement event',
+    },
+  }
+}
+
+function taskStarted(taskId: OrcTaskId, leadNodeId: OrcNodeId): OrcEvent {
+  return {
+    type: 'orc/task/started',
+    data: { version: 1, runId: RUN, taskId, leadNodeId },
+  }
+}
+
+function throughAwaiting(blocking: readonly OrcSeverity[] = BLOCKING): OrcEvent[] {
+  return [
+    workflow(blocking),
+    specRequested(),
+    phase('spec_required'),
+    specResult(),
+    phase('plan_required'),
+    planRequested(),
+    planResult(),
+    phase('awaiting_user_approval'),
+  ]
+}
+
+/** Legal prefix through the first Peer under the only Supervisor → Lead edge. */
+function eventsThroughPeer(): OrcEvent[] {
+  return [
+    ...throughAwaiting(),
+    approval('approved'),
+    taskAssigned(TASK_A),
+    taskAssigned(TASK_B),
+    phase('task_implementation'),
+    node('lead', LEAD_A, SUPERVISOR, TASK_A, 'corr-lead-a'),
+    taskStarted(TASK_A, LEAD_A),
+    node('peer', PEER_A, LEAD_A, TASK_A, 'corr-peer-a'),
+  ]
+}
+
+function nodeSettled(nodeId: OrcNodeId, outcome: OrcNodeOutcome, evidence?: string): OrcEvent {
+  return {
+    type: 'orc/node/settled',
+    data: {
+      version: 1,
+      runId: RUN,
+      nodeId,
+      outcome,
+      ...(evidence === undefined ? {} : { evidence }),
+    },
+  }
+}
+
+function taskSettled(taskId: OrcTaskIdentity, leadNodeId: OrcNodeId): OrcEvent {
+  return {
+    type: 'orc/task/settled',
+    data: { version: 1, runId: RUN, taskId, leadNodeId, evidence: `settled ${taskId}` },
+  }
+}
+
+function reportRequested(
+  kind: 'review' | 'audit',
+  correlationId: string,
+  scope: OrcReviewScope,
+  iteration: number,
+  taskId?: OrcTaskIdentity,
+): OrcEvent {
+  return {
+    type: kind === 'review' ? 'orc/review/requested' : 'orc/audit/requested',
+    data: {
+      version: 1,
+      runId: RUN,
+      correlationId: OrcCorrelationId(correlationId),
+      scope,
+      iteration,
+      role: kind === 'review' ? 'review-only' : 'audit-only',
+      repositoryPath: '/repo',
+      skillRequirements: `superpowers ${kind}`,
+      outputSchema: 'findings',
+      readOnly: true,
+      ...(taskId === undefined ? {} : { taskId }),
+    },
+  }
+}
+
+function reportResult(
+  kind: 'review' | 'audit',
+  correlationId: string,
+  status: OrcReportStatus,
+  findings: readonly { id: string; severity: OrcSeverity; summary: string }[] = [],
+): OrcEvent {
+  return {
+    type: kind === 'review' ? 'orc/review/result' : 'orc/audit/result',
+    data: {
+      version: 1,
+      runId: RUN,
+      correlationId: OrcCorrelationId(correlationId),
+      status,
+      findings: findings.map(finding => ({
+        id: OrcFindingId(finding.id),
+        severity: finding.severity,
+        summary: finding.summary,
+      })),
+    },
+  }
+}
+
+function fixIteration(taskId: OrcTaskIdentity, iteration: number): OrcEvent {
+  return {
+    type: 'orc/fix/iteration',
+    data: {
+      version: 1,
+      runId: RUN,
+      taskId,
+      iteration,
+      decision: `fix ${taskId} iteration ${iteration}`,
+    },
+  }
+}
+
+function runFailed(reason: string): OrcEvent {
+  return { type: 'orc/run/failed', data: { version: 1, runId: RUN, reason } }
+}
+
+function runCompleted(): OrcEvent {
+  return { type: 'orc/run/completed', data: { version: 1, runId: RUN } }
+}
+
+/** One task through Lead and Peer settlement and into review. */
+function throughTaskReview(blocking: readonly OrcSeverity[] = BLOCKING, secondTask = true): OrcEvent[] {
+  return [
+    ...throughAwaiting(blocking),
+    approval('approved'),
+    taskAssigned(TASK_A),
+    ...(secondTask ? [taskAssigned(TASK_B)] : []),
+    phase('task_implementation'),
+    node('lead', LEAD_A, SUPERVISOR, TASK_A, 'corr-lead-a'),
+    taskStarted(TASK_A, LEAD_A),
+    node('peer', PEER_A, LEAD_A, TASK_A, 'corr-peer-a'),
+    nodeSettled(PEER_A, 'settled', 'peer evidence'),
+    phase('task_peer_settlement'),
+    nodeSettled(LEAD_A, 'settled', 'lead evidence'),
+    taskSettled(TASK_A, LEAD_A),
+    phase('task_review'),
+  ]
+}
+
+describe('ORC role edges', () => {
+  it('projects the first supervisor root', () => {
+    const state = replay([workflow()])
+    expect(state.phase).toBe('brainstorming')
+    expect(state.runId).toBe(RUN)
+    expect(state.nodes[0]).toMatchObject({
+      id: SUPERVISOR,
+      role: 'supervisor',
+      phase: 'active',
+    })
+    expect(state.nodes[0]?.parentId).toBeUndefined()
+  })
+
+  it('accepts only the supervisor to lead and lead to peer edges', () => {
+    const state = replay(eventsThroughPeer())
+    expect(state.nodes.map(item => [item.role, item.parentId])).toEqual([
+      ['supervisor', undefined],
+      ['lead', SUPERVISOR],
+      ['peer', LEAD_A],
+    ])
+  })
+
+  it('rejects a lead before the supervisor root', () => {
+    expect(failure([node('lead', LEAD_A, SUPERVISOR, TASK_A, 'corr-lead-a')]))
+      .toMatch(/supervisor root is required/)
+  })
+
+  it('rejects a supervisor to peer edge', () => {
+    const prefix = eventsThroughPeer().slice(0, -1)
+    expect(failure([...prefix, node('peer', PEER_A, SUPERVISOR, TASK_A, 'corr-peer-a')]))
+      .toMatch(/supervisor cannot create a peer/)
+  })
+
+  it('rejects a peer child', () => {
+    expect(failure([
+      ...eventsThroughPeer(),
+      node('peer', OrcNodeId('peer-b'), PEER_A, TASK_A, 'corr-peer-b'),
+    ])).toMatch(/peer cannot spawn a child/)
+  })
+
+  it('does not depend on team events', () => {
+    const source = ['../src/projection.ts', '../src/types.ts', '../src/index.ts', '../package.json']
+      .map(file => readFileSync(new URL(file, import.meta.url), 'utf8'))
+      .join('\n')
+    expect(source).not.toMatch(/team\//)
+    expect(source).not.toContain('agent-team')
+    expect(source).not.toContain('deepseek-flash')
+    expect(source).not.toContain('gpt-5.6')
+  })
+})
+
+describe('ORC transition gates', () => {
+  it('requires explicit plan approval before implementation', () => {
+    const events = [...throughAwaiting(), phase('task_implementation')]
+    const state = events.reduce(applyOrc, emptyOrcState())
+    expect(state.failure).toMatch(/plan approval is required before implementation/)
+    expect(state.phase).toBe('awaiting_user_approval')
+  })
+
+  it('keeps a rejected plan in awaiting_user_approval and creates no lead', () => {
+    const events = [
+      ...throughAwaiting(),
+      approval('rejected'),
+      node('lead', LEAD_A, SUPERVISOR, TASK_A, 'corr-lead-a'),
+    ]
+    const state = events.reduce(applyOrc, emptyOrcState())
+    expect(state.failure).toMatch(/user rejection blocks implementation/)
+    expect(state.phase).toBe('awaiting_user_approval')
+    expect(state.nodes.map(item => item.role)).toEqual(['supervisor'])
+  })
+
+  it('keeps a failed spec in spec_required', () => {
+    const events = [workflow(), specRequested(), phase('spec_required'), specResult('failed'), phase('plan_required')]
+    const state = events.reduce(applyOrc, emptyOrcState())
+    expect(state.failure).toMatch(/codex spec failure blocks plan/)
+    expect(state.phase).toBe('spec_required')
+  })
+
+  it('requires task settlement before review', () => {
+    const events = [
+      ...eventsThroughPeer(),
+      nodeSettled(PEER_A, 'settled', 'peer evidence'),
+      phase('task_peer_settlement'),
+      nodeSettled(LEAD_A, 'settled', 'lead evidence'),
+      phase('task_review'),
+    ]
+    const state = events.reduce(applyOrc, emptyOrcState())
+    expect(state.failure).toMatch(/task settlement is required before review/)
+    expect(state.phase).toBe('task_peer_settlement')
+  })
+
+  it('leaves the task unsettled after peer timeout', () => {
+    const events = [...eventsThroughPeer(), nodeSettled(PEER_A, 'timeout'), taskSettled(TASK_A, LEAD_A)]
+    expect(failure(events)).toMatch(/lead task is unsettled/)
+  })
+
+  it('does not treat a failed lead as ready for review', () => {
+    const events = [
+      ...eventsThroughPeer().slice(0, -1),
+      nodeSettled(LEAD_A, 'failed', 'startup failed'),
+      phase('task_peer_settlement'),
+    ]
+    expect(failure(events)).toMatch(/lead startup failure blocks peer settlement/)
+  })
+
+  it('requires both a review result and an audit result', () => {
+    const review = throughTaskReview()
+    const missingReview = review.reduce(applyOrc, emptyOrcState())
+    const skippedAudit = [...review, phase('task_audit')].reduce(applyOrc, emptyOrcState())
+    expect(skippedAudit.failure).toMatch(/review result is missing/)
+    expect(skippedAudit.phase).toBe('task_review')
+
+    const audited = [
+      ...review,
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok'),
+      phase('task_audit'),
+      phase('next_task'),
+    ].reduce(applyOrc, emptyOrcState())
+    expect(audited.failure).toMatch(/audit result is missing/)
+    expect(audited.phase).toBe('task_audit')
+    expect(missingReview.failure).toBeUndefined()
+  })
+
+  it.each(['critical', 'high', 'medium'] as const)(
+    'routes an unresolved %s finding to fix instead of the next task',
+    (severity) => {
+      const reviewed = [
+        ...throughTaskReview(),
+        reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+        reportResult('review', 'corr-review-a', 'ok', [{ id: 'finding-block', severity, summary: 'blocks' }]),
+        phase('task_audit'),
+        reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+        reportResult('audit', 'corr-audit-a', 'ok'),
+      ]
+      const advanced = [...reviewed, phase('next_task')].reduce(applyOrc, emptyOrcState())
+      const resolved = [
+        ...reviewed,
+        { type: 'orc/finding/resolved', data: { version: 1, runId: RUN, findingId: OrcFindingId('finding-block') } },
+        phase('next_task'),
+      ].reduce(applyOrc, emptyOrcState())
+      const fixed = [...reviewed, phase('task_fix')].reduce(applyOrc, emptyOrcState())
+      expect(advanced.failure).toMatch(/blocking findings require fix/)
+      expect(resolved.failure).toMatch(/blocking findings require fix/)
+      expect(fixed.failure).toBeUndefined()
+      expect(fixed.phase).toBe('task_fix')
+    },
+  )
+
+  it('records low and info findings without blocking the next task', () => {
+    const state = replay([
+      ...throughTaskReview(),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok', [{ id: 'finding-low', severity: 'low', summary: 'nit' }]),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'ok', [{ id: 'finding-info', severity: 'info', summary: 'note' }]),
+      phase('next_task'),
+    ])
+    expect(state.phase).toBe('next_task')
+    expect(state.findings.map(finding => finding.severity)).toEqual(['low', 'info'])
+    expect(state.tasks.find(task => task.id === TASK_A)?.phase).toBe('clean')
+  })
+
+  it('blocks low findings when the run raises the threshold', () => {
+    const raised = ['critical', 'high', 'medium', 'low'] as const
+    const events = [
+      ...throughTaskReview(raised),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok', [{ id: 'finding-low', severity: 'low', summary: 'nit' }]),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'ok'),
+      phase('next_task'),
+    ]
+    expect(failure(events)).toMatch(/blocking findings require fix/)
+  })
+
+  it('requires a clean audit before the next task or final review', () => {
+    const base = [
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok'),
+      phase('task_audit'),
+    ]
+    expect(failure([...base, phase('final_review')])).toMatch(/audit result is missing/)
+    const unavailable = [
+      ...base,
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'unavailable'),
+      phase('final_review'),
+    ]
+    expect(failure(unavailable)).toMatch(/audit result is unavailable and blocks progression/)
+    const clean = replay([
+      ...base,
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'ok'),
+      phase('final_review'),
+    ])
+    expect(clean.phase).toBe('final_review')
+    expect(failure([...base, reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A), reportResult('audit', 'corr-audit-a', 'ok'), phase('next_task')]))
+      .toMatch(/no remaining task/)
+  })
+
+  it('refuses an illegal phase jump and a duplicate correlation id', () => {
+    expect(failure([workflow(), phase('complete')])).toMatch(/illegal phase jump from brainstorming to complete/)
+    expect(failure([workflow(), specRequested(), specRequested()])).toMatch(/duplicate correlation id/)
+  })
+
+  it('records terminal failure and refuses later advancement', () => {
+    const failed = replay([workflow(), runFailed('disposed')])
+    expect(failed.phase).toBe('failed')
+    expect(failed.terminalReason).toBe('disposed')
+    expect(failure([workflow(), runFailed('disposed'), phase('spec_required')])).toMatch(/run has failed/)
+  })
+
+  it('replays spec, approval, fix, the next task, and final completion', () => {
+    const state = replay([
+      ...throughTaskReview(),
+      reportRequested('review', 'corr-review-a0', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a0', 'ok', [{ id: 'finding-medium', severity: 'medium', summary: 'blocks' }]),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a0', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a0', 'ok'),
+      phase('task_fix'),
+      fixIteration(TASK_A, 1),
+      phase('task_review'),
+      reportRequested('review', 'corr-review-a1', 'task', 1, TASK_A),
+      reportResult('review', 'corr-review-a1', 'ok'),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a1', 'task', 1, TASK_A),
+      reportResult('audit', 'corr-audit-a1', 'ok'),
+      phase('next_task'),
+      phase('task_implementation'),
+      node('lead', OrcNodeId('lead-b'), SUPERVISOR, TASK_B, 'corr-lead-b'),
+      taskStarted(TASK_B, OrcNodeId('lead-b')),
+      node('peer', OrcNodeId('peer-b'), OrcNodeId('lead-b'), TASK_B, 'corr-peer-b'),
+      nodeSettled(OrcNodeId('peer-b'), 'settled', 'peer b'),
+      phase('task_peer_settlement'),
+      nodeSettled(OrcNodeId('lead-b'), 'settled', 'lead b'),
+      taskSettled(TASK_B, OrcNodeId('lead-b')),
+      phase('task_review'),
+      reportRequested('review', 'corr-review-b', 'task', 0, TASK_B),
+      reportResult('review', 'corr-review-b', 'ok'),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-b', 'task', 0, TASK_B),
+      reportResult('audit', 'corr-audit-b', 'ok'),
+      phase('final_review'),
+      reportRequested('review', 'corr-branch-review', 'branch', 0),
+      reportResult('review', 'corr-branch-review', 'ok'),
+      reportRequested('audit', 'corr-branch-audit', 'branch', 0),
+      reportResult('audit', 'corr-branch-audit', 'ok'),
+      runCompleted(),
+    ])
+    expect(state.phase).toBe('complete')
+    expect(state.approval).toBe('approved')
+    expect(state.specText).toBe('design spec')
+    expect(state.planText).toBe('implementation plan')
+    expect(state.tasks.map(task => [task.id, task.phase, task.iteration])).toEqual([
+      [TASK_A, 'clean', 1],
+      [TASK_B, 'clean', 0],
+    ])
+    expect(state.findings).toEqual([
+      expect.objectContaining({ id: OrcFindingId('finding-medium'), severity: 'medium', status: 'open' }),
+    ])
+    expect(failure([
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok'),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'ok'),
+      phase('final_review'),
+      runCompleted(),
+    ])).toMatch(/branch review result is missing/)
+  })
+})
