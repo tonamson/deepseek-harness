@@ -1,6 +1,6 @@
 # Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write packages/experimental/tool-orc/README.md
-README.md: b7614805baf69b54d099a660284bde7b8b6ed093
-README.zh.md: 6039c0a6ddc114045a7a6bcbd919c8315d63791b
+#   pnpm run verify-translation-pairing --write packages/experimental/orc-profile/README.md
+README.md: daa37e208de22d001be67b00eae5cfc5c8a69c2d
+README.zh.md: 92e31f33fe60d422183bfcbab0df00ba517d2f28

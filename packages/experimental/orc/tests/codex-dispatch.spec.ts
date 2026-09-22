@@ -360,13 +360,14 @@ async function approveWorkflow(harness: Harness, blocking?: readonly OrcSeverity
   await createRun(harness, blocking)
   const spec = JSON.stringify({ stage: 'codex-spec', spec: 'design is complete' })
   harness.fake.queue.push(Promise.resolve(textResult(spec)))
-  await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
-  await harness.service.advance(harness.supervisor, 'plan_required')
+  await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
   const plan = JSON.stringify({ stage: 'codex-plan', plan: 'ship the task' })
   harness.fake.queue.push(Promise.resolve(textResult(plan)))
-  await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+  await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.service.advance(harness.supervisor, 'awaiting_user_approval')
-  await harness.service.approvePlan(harness.supervisor, 'approved')
+  const append = harness.supervisor.session.append.bind(harness.supervisor.session) as (type: string, data: unknown) => void
+  append('plan/review', { version: 1, correlation: 'plan-review-1', decision: 'approved' })
+  await harness.service.planReviewSettled()
 }
 
 async function settleNode(harness: Harness, launch: OrcLaunch, role: 'lead' | 'peer', taskId: ReturnType<typeof OrcTaskId>): Promise<void> {
@@ -403,7 +404,7 @@ describe('Codex dispatch', () => {
     await createRun(harness)
     const specRaw = JSON.stringify({ stage: 'codex-spec', spec: 'design is complete' })
     harness.fake.queue.push(Promise.resolve(textResult(specRaw)))
-    const specState = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const specState = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(specState.specText).toBe('design is complete')
     expect(specState.delegations[0]).toMatchObject({
       kind: 'codex-spec',
@@ -427,10 +428,9 @@ describe('Codex dispatch', () => {
     expect(specPrompt).not.toContain('plan-envelope')
     expect(specCall?.request.outputSchema).toBeUndefined()
 
-    await harness.service.advance(harness.supervisor, 'plan_required')
     const planRaw = JSON.stringify({ stage: 'codex-plan', plan: 'ship the task' })
     harness.fake.queue.push(Promise.resolve(textResult(planRaw)))
-    const planState = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const planState = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(planState.planText).toBe('ship the task')
     expect(planState.delegations[0]?.correlationId).not.toBe(planState.delegations[1]?.correlationId)
     expect(planState.delegations[1]).toMatchObject({
@@ -463,7 +463,7 @@ describe('Codex dispatch', () => {
       ],
       stopReason: 'completed',
     }))
-    const state = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const state = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(state.specText).toBe('visible')
     expect(state.delegations[0]?.rawText).toBe(visible)
   })
@@ -472,7 +472,7 @@ describe('Codex dispatch', () => {
     const harness = await setup()
     await createRun(harness)
     harness.fake.queue.push(Promise.resolve(textResult('not json')))
-    const malformed = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const malformed = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(malformed.specText).toBeUndefined()
     expect(malformed.delegations[0]).toMatchObject({ status: 'malformed', blocksProgress: true, rawText: 'not json' })
     await expect(harness.service.advance(harness.supervisor, 'plan_required')).rejects.toThrow(/codex spec failure blocks plan/)
@@ -480,18 +480,18 @@ describe('Codex dispatch', () => {
     const rejected = Promise.reject(new Error('socket closed'))
     void rejected.catch(() => undefined)
     harness.fake.queue.push(rejected)
-    const unavailable = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const unavailable = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(unavailable.specText).toBeUndefined()
     expect(unavailable.delegations.at(-1)).toMatchObject({ status: 'unavailable', blocksProgress: true, rawText: 'socket closed' })
 
     const raw = JSON.stringify({ stage: 'codex-spec', spec: 'do not accept' })
     harness.fake.queue.push(Promise.resolve(textResult(raw, 'error')))
-    const failed = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const failed = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(failed.specText).toBeUndefined()
     expect(failed.delegations.at(-1)).toMatchObject({ status: 'failed', blocksProgress: true, rawText: raw })
 
     harness.fake.queue.push(Promise.resolve({ output: [], stopReason: 'completed' }))
-    const missing = await runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)
+    const missing = await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(missing.delegations.at(-1)).toMatchObject({ status: 'unavailable', blocksProgress: true })
     expect(missing.delegations.at(-1)?.rawText).toBeUndefined()
     expect(eventTypes(harness)).not.toContain('orc/run/completed')
@@ -501,7 +501,7 @@ describe('Codex dispatch', () => {
     const harness = await setup()
     await createRun(harness)
     harness.fake.failOneShot = true
-    await expect(runCodexSpecPlan(harness.service, harness.supervisor, SIGNAL)).rejects.toThrow(/one-shot start failed/)
+    await expect(runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/one-shot start failed/)
     expect(harness.service.state(harness.supervisor).delegations[0]).toMatchObject({
       kind: 'codex-spec',
       status: 'failed',

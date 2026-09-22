@@ -46,11 +46,11 @@ kind: "package-reference"
 
 目录对每个角色都是同一份：
 
-- **打开并监督** — `orc_create_workflow`、`orc_request_spec_plan`、`orc_record_plan_decision`、`orc_assign_task`、`orc_request_review`、`orc_request_audit`、`orc_advance` 与 `orc_fail`。
+- **打开并监督** — `orc_create_workflow`、`orc_request_spec_plan`、`orc_assign_task`、`orc_request_review`、`orc_request_audit`、`orc_run_task_gates`、`orc_run_final_gates`、`orc_advance` 与 `orc_fail`。
 - **创建并结算** — `orc_spawn`、`orc_start_task` 与 `orc_settle_task`。
 - **报告** — `orc_record_result` 只记录 DeepSeek 节点。Codex 的 spec、plan、review 与 audit 结果不是模型工具。`orc_record_fix` 记录修复决定。
 
-`orc_record_plan_decision` 记录调用方已经传入的 `plan/review` 决定。它不会默认写成 `approved`。review 与 audit 是两个工具。畸形或缺失的 Codex 结果仍是服务失败。
+`orc_request_spec_plan` 接收 `context_ref`，并且是进入 `spec_required` 或 `plan_required` 的唯一调用。没有 ORC 工具接受批准决定。`orc_run_task_gates` 与 `orc_run_final_gates` 把阻断发现发给现有 Lead。review 与 audit 仍是两个工具。畸形或缺失的 Codex 结果仍是服务失败。
 
 ### 已记录的模型输入
 
@@ -68,7 +68,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部细节 — 点击展开</summary>
 
-适配器在每个 agent 作用域上注册同一套 `defineTool` schema。执行时读取 `ctx.orc`。对于服务自身不按角色拒绝的操作，例如 Peer 记录计划批准，工具抛出 `OrcToolError`。spawn、advance 与 fail 交给服务，服务仍是转移是否合法的权威。
+适配器在每个 agent 作用域上注册同一套 `defineTool` schema。执行时读取 `ctx.orc`。对于服务自身不按角色拒绝的操作，例如 Peer 请求 Codex，工具抛出 `OrcToolError`。spawn、advance 与 fail 交给服务，服务仍是转移是否合法的权威。
 
 | 文件 | 职责 |
 |---|---|
@@ -94,7 +94,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-每个 agent 得到一个 `orc:role` 段落。文本写明 `role`、`parent`、`authority`、`phase`、`task` 与 `mandatory Superpowers skills`。Supervisor、Lead 与 Peer 的段落不同。该段落还带有该角色的 Superpowers 工作流要求；运行尚未打开时则是未分配句子。`orc_spawn` 记入日志的 DeepSeek 子提示会重复角色段落，并带有 `skillCatalog: using-superpowers, brainstorming, writing-plans, subagent-driven-development, test-driven-development, requesting-code-review, verification-before-completion`。Codex 文本是另一份，并写明 `Native Codex children do not inherit DSH skills or context.` 工具 schema 不随角色缩减；角色不能执行的调用返回 `ORC_UNAUTHORIZED` 或 `ORC_REFUSED`。`orc_record_plan_decision` 不会编造 `approved`。
+每个 agent 得到一个 `orc:role` 段落。文本写明 `role`、`parent`、`authority`、`phase`、`task` 与 `mandatory Superpowers skills`。Supervisor、Lead 与 Peer 的段落不同。该段落还带有该角色的 Superpowers 工作流要求；运行尚未打开时则是未分配句子。`orc_spawn` 记入日志的 DeepSeek 子提示会重复角色段落，并带有 `skillCatalog: using-superpowers, brainstorming, writing-plans, subagent-driven-development, test-driven-development, requesting-code-review, verification-before-completion`。Codex 文本是另一份，并写明 `Native Codex children do not inherit DSH skills or context.` 工具 schema 不随角色缩减；角色不能执行的调用返回 `ORC_UNAUTHORIZED` 或 `ORC_REFUSED`。批准来自已记录的 `plan/review` 事件，而不是工具参数。
 
 ##### 角色段落
 
@@ -119,7 +119,7 @@ mandatory Superpowers skills: test-driven-development, verification-before-compl
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **计划决定由调用方传入** — `orc_record_plan_decision` 保存决定参数。它不读取 `plan/review` 事件。后续 profile 会接上该事件，使模型不能自行制造批准。
+- **批准不是工具** — 服务只从 Supervisor 会话上的 version-1 `plan/review` 复制 `approved` 或 `rejected`。`dismissed`、`/plan off` 与 `plan/mode` 都不会批准。
 - **提示文本不是权限** — 段落告诉模型它的角色。Peer 的 spawn 或阶段变化仍由 `OrcService` 拒绝。
 - **原生 Codex 子运行在 DSH 之外** — 它们不继承 skills、工具或会话上下文。只有信封文本会到达它们。
 - **实验性原型，没有稳定性承诺** — schema 在孵化期间可以改变。

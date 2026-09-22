@@ -25,11 +25,12 @@ const TOOL_NAMES = [
   'orc_create_workflow',
   'orc_fail',
   'orc_record_fix',
-  'orc_record_plan_decision',
   'orc_record_result',
   'orc_request_audit',
   'orc_request_review',
   'orc_request_spec_plan',
+  'orc_run_final_gates',
+  'orc_run_task_gates',
   'orc_settle_task',
   'orc_spawn',
   'orc_start_task',
@@ -205,7 +206,7 @@ async function openWorkflow(harness: Harness): Promise<void> {
 
 async function finishFromOpenSpec(harness: Harness): Promise<void> {
   const task = OrcTaskId(TASK)
-  const spec = await harness.orc.startSpecPlan(harness.supervisor, SIGNAL)
+  const spec = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.orc.recordResult(harness.supervisor, {
     correlationId: spec.correlationId,
     stage: 'codex-spec',
@@ -213,8 +214,7 @@ async function finishFromOpenSpec(harness: Harness): Promise<void> {
     status: 'ok',
     text: 'design spec',
   })
-  await harness.orc.advance(harness.supervisor, 'plan_required', task)
-  const plan = await harness.orc.startSpecPlan(harness.supervisor, SIGNAL)
+  const plan = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.orc.recordResult(harness.supervisor, {
     correlationId: plan.correlationId,
     stage: 'codex-plan',
@@ -223,7 +223,9 @@ async function finishFromOpenSpec(harness: Harness): Promise<void> {
     text: 'implementation plan',
   })
   await harness.orc.advance(harness.supervisor, 'awaiting_user_approval')
-  await harness.orc.approvePlan(harness.supervisor, 'approved')
+  const append = harness.supervisor.session.append.bind(harness.supervisor.session) as (type: string, data: unknown) => void
+  append('plan/review', { version: 1, correlation: 'plan-review-1', decision: 'approved' })
+  await harness.orc.planReviewSettled()
   await harness.orc.assignTask(harness.supervisor, {
     taskId: task,
     writeScope: ['src'],
@@ -351,8 +353,6 @@ describe('dsh-tool-orc', () => {
       source: 'plan/review',
     })
     expect(approved.isError).toBe(true)
-    expect(errorCode(approved)).toBe('ORC_UNAUTHORIZED')
-    expect(text(approved)).toMatch(/cannot approve a plan/)
     expect(harness.orc.state(harness.supervisor).approval).toBe('approved')
 
     const review = await execute(harness.ctx, peer, 'orc_request_review', { scope: 'task', task_id: TASK })
@@ -372,7 +372,7 @@ describe('dsh-tool-orc', () => {
     expect(text(other)).toMatch(/cannot advance another task/)
     expect(harness.orc.state(harness.supervisor).phase).toBe(phase)
 
-    const leadCodex = await execute(harness.ctx, lead, 'orc_request_spec_plan', {})
+    const leadCodex = await execute(harness.ctx, lead, 'orc_request_spec_plan', { context_ref: 'brainstorm-1' })
     expect(errorCode(leadCodex)).toBe('ORC_UNAUTHORIZED')
     expect(harness.fake.oneShot).toHaveLength(shots)
 
@@ -454,11 +454,9 @@ describe('dsh-tool-orc', () => {
     const named = await execute(harness.ctx, harness.supervisor, 'orc_advance', { to: 'next_task', task_id: 'other-task' })
     expect(errorCode(named)).toBe('ORC_REFUSED')
     expect(harness.orc.state(harness.supervisor).phase).toBe(phase)
-    const again = await execute(harness.ctx, harness.supervisor, 'orc_record_plan_decision', {
-      decision: 'rejected',
-      source: 'plan/review',
-    })
-    expect(errorCode(again)).toBe('ORC_REFUSED')
+    const rejectReview = harness.supervisor.session.append.bind(harness.supervisor.session) as (type: string, data: unknown) => void
+    rejectReview('plan/review', { version: 1, correlation: 'later-review', decision: 'rejected' })
+    await harness.orc.planReviewSettled()
     expect(harness.orc.state(harness.supervisor).approval).toBe('approved')
     const lateAssign = await execute(harness.ctx, harness.supervisor, 'orc_assign_task', {
       task_id: 'task-b',
@@ -466,7 +464,7 @@ describe('dsh-tool-orc', () => {
       acceptance_criteria: 'docs',
     })
     expect(errorCode(lateAssign)).toBe('ORC_REFUSED')
-    const lateSpec = await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', {})
+    const lateSpec = await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', { context_ref: 'brainstorm-1' })
     expect(errorCode(lateSpec)).toBe('ORC_REFUSED')
     const earlyReview = await execute(harness.ctx, harness.supervisor, 'orc_request_review', { scope: 'task', task_id: TASK })
     expect(errorCode(earlyReview)).toBe('ORC_REFUSED')
@@ -635,7 +633,7 @@ describe('dsh-tool-orc', () => {
     expect(openedPrompt).toContain('role: supervisor')
     expect(openedPrompt).toContain('Superpowers workflow requirements')
     expect(openedPrompt).not.toContain('Superpowers workflow requirements apply when the workflow opens.')
-    const spec = await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', {})
+    const spec = await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', { context_ref: 'brainstorm-1' })
     expect(spec.isError, text(spec)).toBe(false)
     const forgedSpec = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
       correlation_id: 'spec-row',
@@ -651,7 +649,7 @@ describe('dsh-tool-orc', () => {
     const shot = harness.fake.oneShot.at(-1)
     expect(shot?.request.outputSchema).toBeUndefined()
     expect(shot?.request.maxDepth).toBeUndefined()
-    expect(promptText(shot?.request.prompt)).toBe(renderCodexEnvelope({
+    expect(promptText(shot?.request.prompt)).toBe(`${renderCodexEnvelope({
       role: 'spec-only',
       stage: 'codex-spec',
       repositoryScope: CONFIG.repositoryPath,
@@ -661,7 +659,7 @@ describe('dsh-tool-orc', () => {
       provider: CONFIG.codexSpec.provider,
       model: CONFIG.codexSpec.model,
       effort: CONFIG.codexSpec.effort,
-    }))
+    })}\ncontextRef: brainstorm-1`)
 
     await finishFromOpenSpec(harness)
     const spawned = await execute(harness.ctx, harness.supervisor, 'orc_spawn', {
@@ -741,13 +739,6 @@ describe('dsh-tool-orc', () => {
     expect(harness.orc.state(harness.supervisor).runId).toBeDefined()
     expect(events()).toBe(before)
 
-    const invented = await execute(harness.ctx, harness.supervisor, 'orc_record_plan_decision', {
-      source: 'plan/review',
-    })
-    expect(errorCode(invented)).toBe('INVALID_ARGS')
-    expect(harness.orc.state(harness.supervisor).approval).toBeUndefined()
-    expect(events()).toBe(before)
-
     const blankFinding = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
       correlation_id: 'corr-1',
       stage: 'deepseek-node',
@@ -791,5 +782,11 @@ describe('dsh-tool-orc', () => {
     expect(errorCode(blankScopeItem)).toBe('ORC_INVALID_INPUT')
     expect(events()).toBe(before)
     expect(harness.fake.oneShot).toHaveLength(shots)
+    const invented = harness.supervisor.session.append.bind(harness.supervisor.session) as (type: string, data: unknown) => void
+    invented('plan/mode', { active: false })
+    invented('plan/review', { version: 1, correlation: 'dismissed-review', decision: 'dismissed' })
+    await harness.orc.planReviewSettled()
+    expect(harness.orc.state(harness.supervisor).approval).toBeUndefined()
+    expect(harness.orc.state(harness.supervisor).phase).toBe('brainstorming')
   })
 })

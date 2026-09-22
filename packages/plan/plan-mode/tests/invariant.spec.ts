@@ -84,6 +84,30 @@ describe('plan-mode stream invariants', () => {
     await expect(ctx.plugin(PlanModeInvariant).then(() => undefined)).resolves.toBeUndefined()
   })
 
+  it('accepts a version-1 plan review and replays it', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create()
+    const append = session.append.bind(session) as (type: string, data: unknown) => void
+    append('plan/review', { version: 1, correlation: 'call-1', decision: 'approved' })
+    expect(session.snapshotEvents().filter(event => event.type === 'plan/review').map(event => event.data)).toEqual([
+      { version: 1, correlation: 'call-1', decision: 'approved' },
+    ])
+    await ctx.plugin(InvariantRegistry, { enabled: true })
+    await expect(ctx.plugin(PlanModeInvariant).then(() => undefined)).resolves.toBeUndefined()
+    expect(session.snapshotEvents().filter(event => event.type === 'plan/review').map(event => event.data)).toEqual([
+      { version: 1, correlation: 'call-1', decision: 'approved' },
+    ])
+  })
+
+  it('rejects a plan review without a user decision', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create()
+    const append = session.append.bind(session) as (type: string, data: unknown) => void
+    expect(() => append('plan/review', { version: 1, correlation: '', decision: 'approved' })).toThrow(/plan\/review/)
+    expect(() => append('plan/review', { version: 1, correlation: 'call-1', decision: 'maybe' })).toThrow(/plan\/review/)
+  })
+
   it('accepts standalone existing plan state on late registration', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

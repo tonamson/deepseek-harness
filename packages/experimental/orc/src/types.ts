@@ -164,6 +164,8 @@ export interface OrcDelegation {
    * DeepSeek `nodeId` is the child session id.
    */
   readonly messageId?: string
+  /** Completed brainstorm or context reference copied from a spec or plan request. */
+  readonly contextRef?: string
   readonly findingIds: readonly OrcFindingId[]
 }
 
@@ -255,6 +257,8 @@ export interface OrcSpecRequested extends OrcCodexEnvelope {
   readonly version: 1
   readonly runId: OrcRunId
   readonly correlationId: OrcCorrelationId
+  /** Completed brainstorm or context reference. Prompt text is not a substitute. */
+  readonly contextRef: string
   readonly role: 'spec-only'
 }
 
@@ -274,6 +278,8 @@ export interface OrcPlanRequested extends OrcCodexEnvelope {
   readonly version: 1
   readonly runId: OrcRunId
   readonly correlationId: OrcCorrelationId
+  /** Completed brainstorm or context reference. Prompt text is not a substitute. */
+  readonly contextRef: string
   readonly role: 'plan-only'
 }
 

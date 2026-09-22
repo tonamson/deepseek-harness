@@ -27,6 +27,7 @@ kind: "package-group"
 | [`agent-team-profile`](agent-team-profile/README.zh.md) | Agent Teams 的公开 opt-in profile 层 | — |
 | [`agent-team`](agent-team/README.zh.md) | 具名 teammate，成员之间持久消息与共享任务板 | `ctx.agentTeams` |
 | [`orc`](orc/README.zh.md) | 持久的 Supervisor、Lead 与 Peer 工作流投影 | — |
+| [`orc-profile`](orc-profile/README.zh.md) | 严格 ORC 工作流的可选 profile 层 | — |
 | [`tool-orc`](tool-orc/README.zh.md) | 按角色划分的 ORC 工具与 Superpowers 提示信封 | 按作用域把工具注册到 `ctx.tools` |
 | [`agent-team-web-profile`](agent-team-web-profile/README.zh.md) | Agent Teams 的公开 opt-in Web 层 | — |
 | [`client-ui-agent-team`](client-ui-agent-team/README.zh.md) | Web Team roster、任务板与 teammate 导航 | — |

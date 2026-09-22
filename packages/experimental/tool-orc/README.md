@@ -46,11 +46,11 @@ The service config supplies the DeepSeek route, the four Codex routes, the repos
 
 The catalog is one list for every role:
 
-- **Open and supervise** — `orc_create_workflow`, `orc_request_spec_plan`, `orc_record_plan_decision`, `orc_assign_task`, `orc_request_review`, `orc_request_audit`, `orc_advance`, and `orc_fail`.
+- **Open and supervise** — `orc_create_workflow`, `orc_request_spec_plan`, `orc_assign_task`, `orc_request_review`, `orc_request_audit`, `orc_run_task_gates`, `orc_run_final_gates`, `orc_advance`, and `orc_fail`.
 - **Create and settle** — `orc_spawn`, `orc_start_task`, and `orc_settle_task`.
 - **Report** — `orc_record_result` records a DeepSeek node only. Codex spec, plan, review, and audit results are not a model tool. `orc_record_fix` records a fix decision.
 
-`orc_record_plan_decision` records a `plan/review` decision the caller already passes. It has no default of `approved`. Review and audit are separate tools. A malformed or missing Codex result stays a service failure.
+`orc_request_spec_plan` takes `context_ref` and is the only call that enters `spec_required` or `plan_required`. No ORC tool accepts an approval decision. `orc_run_task_gates` and `orc_run_final_gates` send blocking findings to the existing Lead. Review and audit stay separate. A malformed or missing Codex result stays a service failure.
 
 ### Logged model input
 
@@ -68,7 +68,7 @@ A successful call returns compact JSON with the phase or the correlation id. A r
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The adapter registers the same `defineTool` schemas on each agent scope. Execution reads `ctx.orc` and throws `OrcToolError` for a malformed id or a role the service does not itself reject, such as a Peer recording plan approval. Spawn, advance, and fail go to the service, which remains the transition authority.
+The adapter registers the same `defineTool` schemas on each agent scope. Execution reads `ctx.orc` and throws `OrcToolError` for a malformed id or a role the service does not itself reject, such as a Peer requesting Codex. Spawn, advance, and fail go to the service, which remains the transition authority.
 
 | File | Role |
 |---|---|
@@ -94,7 +94,7 @@ No runtime invariant companion is published. The ORC projection and `OrcService`
 
 #### What the model sees
 
-Each agent gets one `orc:role` section. The text states `role`, `parent`, `authority`, `phase`, `task`, and `mandatory Superpowers skills`. Supervisor, Lead, and Peer sections differ. The section also carries the Superpowers workflow requirements for that role, or the unassigned sentence before a run exists. DeepSeek child prompts logged by `orc_spawn` repeat the role section plus `skillCatalog: using-superpowers, brainstorming, writing-plans, subagent-driven-development, test-driven-development, requesting-code-review, verification-before-completion`. Codex text is separate and says `Native Codex children do not inherit DSH skills or context.` Tool schemas stay complete across roles; execution returns `ORC_UNAUTHORIZED` or `ORC_REFUSED` for a call the role cannot make. `orc_record_plan_decision` does not invent `approved`.
+Each agent gets one `orc:role` section. The text states `role`, `parent`, `authority`, `phase`, `task`, and `mandatory Superpowers skills`. Supervisor, Lead, and Peer sections differ. The section also carries the Superpowers workflow requirements for that role, or the unassigned sentence before a run exists. DeepSeek child prompts logged by `orc_spawn` repeat the role section plus `skillCatalog: using-superpowers, brainstorming, writing-plans, subagent-driven-development, test-driven-development, requesting-code-review, verification-before-completion`. Codex text is separate and says `Native Codex children do not inherit DSH skills or context.` Tool schemas stay complete across roles; execution returns `ORC_UNAUTHORIZED` or `ORC_REFUSED` for a call the role cannot make. Approval is a logged `plan/review` event, not a tool argument.
 
 ##### Role section
 
@@ -119,7 +119,7 @@ A phase, task, or role change rewrites `orc:role` and invalidates the system pre
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Plan decision is caller-supplied** — `orc_record_plan_decision` stores the decision argument. It does not read a `plan/review` event. A later profile wires that event so the model cannot mint approval.
+- **Approval is not a tool** — the service copies `approved` or `rejected` only from a version-1 `plan/review` event on the Supervisor session. `dismissed`, `/plan off`, and `plan/mode` do not approve.
 - **Prompt text is not authority** — the section tells the model its role. `OrcService` still refuses a Peer spawn or phase change.
 - **Native Codex children are outside DSH** — they do not inherit skills, tools, or session context. Only the envelope text reaches them.
 - **Experimental prototype with no stability promise** — schemas can change while the package incubates.

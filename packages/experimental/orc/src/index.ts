@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { z } from 'zod'
-import { settleCodexRun } from './codex-dispatch.ts'
+import { runCodexFinalLoop, runCodexTaskLoop, settleCodexRun, type OrcFixWork } from './codex-dispatch.ts'
 import type { OrcCodexStage } from './codex-results.ts'
 import { renderCodexEnvelope } from './envelope.ts'
 import {
@@ -59,9 +59,16 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** Latest version-1 `plan/review` on one session. `null` means none has been logged. */
+export interface OrcPlanReviewState {
+  readonly correlation: string
+  readonly decision: 'approved' | 'rejected' | 'dismissed'
+}
+
 declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionStateMap {
     orc: OrcState
+    orcPlanReview: OrcPlanReviewState | null
   }
 }
 
@@ -201,8 +208,36 @@ const orcProjectionDefinition = {
   },
 }
 
+const orcPlanReviewProjection = {
+  key: 'orcPlanReview' as const,
+  stateVersion: 1,
+  stateSchema: z.custom<OrcPlanReviewState | null>(),
+  init(): OrcPlanReviewState | null {
+    return null
+  },
+  apply(state: OrcPlanReviewState | null, event: SessionEvent): OrcPlanReviewState | null {
+    if ((event as { type: string }).type !== 'plan/review') return state
+    return readPlanReview(event.data) ?? state
+  },
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function readPlanReview(data: unknown): { correlation: string; decision: 'approved' | 'rejected' | 'dismissed' } | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const record = data as Record<string, unknown>
+  if (record.version !== 1 || typeof record.correlation !== 'string' || record.correlation.length === 0) return undefined
+  if (record.decision !== 'approved' && record.decision !== 'rejected' && record.decision !== 'dismissed') return undefined
+  return { correlation: record.correlation, decision: record.decision }
+}
+
+function assistantText(data: unknown): string | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const message = (data as { message?: { content?: readonly { type?: string; text?: string }[] } }).message
+  const text = message?.content?.flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n')
+  return text !== undefined && text.trim() !== '' ? text : undefined
 }
 
 function codexPrompt(fields: {
@@ -215,27 +250,27 @@ function codexPrompt(fields: {
   readonly model: string
   readonly effort: string
   readonly blockingSeverities: readonly string[]
+  readonly contextRef?: string
   readonly scope?: string
   readonly taskId?: string
   readonly iteration?: number
 }): ContentBlock[] {
-  return [{
-    type: 'text',
-    text: renderCodexEnvelope({
-      role: fields.role,
-      stage: fields.stage,
-      repositoryScope: fields.repositoryPath,
-      skillWorkflow: fields.skillRequirements,
-      expectedStructuredResult: fields.outputSchema,
-      blockingSeverities: fields.blockingSeverities,
-      provider: fields.provider,
-      model: fields.model,
-      effort: fields.effort,
-      ...(fields.scope === undefined ? {} : { scope: fields.scope }),
-      ...(fields.taskId === undefined ? {} : { taskId: fields.taskId }),
-      ...(fields.iteration === undefined ? {} : { iteration: fields.iteration }),
-    }),
-  }]
+  const envelope = renderCodexEnvelope({
+    role: fields.role,
+    stage: fields.stage,
+    repositoryScope: fields.repositoryPath,
+    skillWorkflow: fields.skillRequirements,
+    expectedStructuredResult: fields.outputSchema,
+    blockingSeverities: fields.blockingSeverities,
+    provider: fields.provider,
+    model: fields.model,
+    effort: fields.effort,
+    ...(fields.scope === undefined ? {} : { scope: fields.scope }),
+    ...(fields.taskId === undefined ? {} : { taskId: fields.taskId }),
+    ...(fields.iteration === undefined ? {} : { iteration: fields.iteration }),
+  })
+  const text = fields.contextRef === undefined ? envelope : `${envelope}\ncontextRef: ${fields.contextRef}`
+  return [{ type: 'text', text }]
 }
 
 /**
@@ -248,6 +283,7 @@ export class OrcService extends Service {
   private readonly config: OrcServiceConfig
   private readonly live = new Map<string, LiveContinuation>()
   private readonly codexJobs = new Map<string, Promise<OrcState>>()
+  private planReviewChain: Promise<void> = Promise.resolve()
 
   /**
    * @param ctx - context with agents, sessions, session persistence, projections, and subagents.
@@ -262,10 +298,31 @@ export class OrcService extends Service {
     this.config = parsed.data
     ctx.effect(() => {
       const disposeProjection = ctx.sessionProjections.register(orcProjectionDefinition)
+      const disposeReview = ctx.sessionProjections.register(orcPlanReviewProjection)
+      const stop = ctx.on('session/event', (session, event) => {
+        if ((event as { type: string }).type !== 'plan/review') return
+        this.enqueuePlanReview(session, event.data)
+      })
+      for (const session of ctx.sessions.list()) {
+        const review = ctx.sessionProjections.stateOf(session, 'orcPlanReview')
+        if (review === undefined || review === null) continue
+        this.enqueuePlanReview(session, { version: 1, correlation: review.correlation, decision: review.decision })
+      }
       return () => {
+        stop()
+        disposeReview()
         disposeProjection()
       }
     })
+  }
+
+  /**
+   * Wait until plan/review events observed so far have been applied.
+   * A review that is not an approval leaves the run unapproved.
+   * @returns after the queued reviews settle.
+   */
+  planReviewSettled(): Promise<void> {
+    return this.planReviewChain
   }
 
   /**
@@ -361,11 +418,13 @@ export class OrcService extends Service {
    * Open the next legal Codex spec or plan run, or return the open one.
    * A caller who is not the supervisor is refused before the fold runs.
    * @param caller - Supervisor agent.
+   * @param contextRef - completed brainstorm or context reference. Blank text is refused.
    * @param signal - cancellation before the one-shot run is published.
    * @returns the correlated launch.
    */
-  async startSpecPlan(caller: Agent, signal: AbortSignal): Promise<OrcLaunch> {
+  async startSpecPlan(caller: Agent, contextRef: string, signal: AbortSignal): Promise<OrcLaunch> {
     this.requireSupervisorCaller(caller)
+    if (contextRef.trim() === '') throw new OrcError('brainstorm context reference is required')
     const session = this.sessionFor(caller)
     const state = this.readState(session)
     const runId = this.requireRun(state)
@@ -377,32 +436,39 @@ export class OrcService extends Service {
       throw new OrcError('delegated run has no continuation handle')
     }
     const correlationId = OrcCorrelationId(randomUUID())
-    const spec = this.codexRequest(runId, correlationId, 'codex-spec')
+    const spec = this.codexRequest(runId, correlationId, 'codex-spec', contextRef)
     const specFailure = applyOrc(state, spec).failure
     if (specFailure === undefined) {
       return this.launchCodex(caller, session, spec, this.config.codexSpec, 'spec_required', signal)
     }
-    const plan = this.codexRequest(runId, correlationId, 'codex-plan')
+    const plan = this.codexRequest(runId, correlationId, 'codex-plan', contextRef)
     if (applyOrc(state, plan).failure === undefined) {
-      return this.launchCodex(caller, session, plan, this.config.codexPlan, undefined, signal)
+      return this.launchCodex(caller, session, plan, this.config.codexPlan, 'plan_required', signal)
     }
     throw new OrcError(specFailure)
   }
 
   /**
-   * Record an explicit `plan/review` decision. This does not read plan mode.
-   * A caller who is not the supervisor is refused before the fold runs.
+   * Run task review, audit, and the Lead fix until both gates are clean or one result blocks.
+   * The fix callback delivers findings to the existing Lead. It does not invent a decision.
    * @param caller - Supervisor agent.
-   * @param decision - approved or rejected.
+   * @param signal - cancellation for each Codex start and the Lead message.
    * @returns the projected run.
    */
-  async approvePlan(caller: Agent, decision: 'approved' | 'rejected'): Promise<OrcState> {
+  runTaskLoop(caller: Agent, signal: AbortSignal): Promise<OrcState> {
     this.requireSupervisorCaller(caller)
-    const session = this.sessionFor(caller)
-    return this.commit(session, {
-      type: 'orc/plan/approval',
-      data: { version: 1, runId: this.requireRun(this.readState(session)), decision, source: 'plan/review' },
-    })
+    return runCodexTaskLoop(this, caller, signal, this.leadFix(caller, signal))
+  }
+
+  /**
+   * Run the branch review and audit. A blocking finding is sent to that task's Lead.
+   * @param caller - Supervisor agent.
+   * @param signal - cancellation for each Codex start and the Lead message.
+   * @returns the projected run.
+   */
+  runFinalLoop(caller: Agent, signal: AbortSignal): Promise<OrcState> {
+    this.requireSupervisorCaller(caller)
+    return runCodexFinalLoop(this, caller, signal, this.leadFix(caller, signal))
   }
 
   /**
@@ -768,6 +834,12 @@ export class OrcService extends Service {
         data: { version: 1, runId, to: 'spec_required', actorNodeId: OrcNodeId(caller.id) },
       })
     }
+    if (open.kind === 'codex-plan' && this.readState(session).phase !== 'plan_required') {
+      await this.commit(session, {
+        type: 'orc/phase',
+        data: { version: 1, runId, to: 'plan_required', actorNodeId: OrcNodeId(caller.id) },
+      })
+    }
     await this.commit(session, this.startupFailure(runId, open, 'delegated run has no continuation handle'))
   }
 
@@ -797,10 +869,12 @@ export class OrcService extends Service {
     runId: ReturnType<typeof OrcRunId>,
     correlationId: OrcCorrelationIdentity,
     kind: 'codex-spec' | 'codex-plan',
+    contextRef: string,
   ): Extract<OrcEvent, { type: 'orc/spec/requested' | 'orc/plan/requested' }> {
     const spec = kind === 'codex-spec'
     const route = spec ? this.config.codexSpec : this.config.codexPlan
     const envelope = {
+      contextRef,
       repositoryPath: this.config.repositoryPath,
       skillRequirements: this.config.skillRequirements,
       outputSchema: spec ? this.config.specOutputSchema : this.config.planOutputSchema,
@@ -839,6 +913,7 @@ export class OrcService extends Service {
           provider: route.provider,
           model: route.model,
           effort: route.effort,
+          contextRef: event.data.contextRef,
           blockingSeverities: this.readState(session).blockingSeverities,
         }),
         parent: caller,
@@ -1011,6 +1086,108 @@ export class OrcService extends Service {
     return input.stage === 'codex-review'
       ? { type: 'orc/review/result', data: { version: 1, runId, correlationId, status, findings, ...rawText } }
       : { type: 'orc/audit/result', data: { version: 1, runId, correlationId, status, findings, ...rawText } }
+  }
+
+  /** Deliver blocking findings to the task Lead and use that Lead's later reply as the fix decision. */
+  private leadFix(caller: Agent, signal: AbortSignal): OrcFixWork {
+    return async (input) => {
+      const task = this.state(caller).tasks.find(item => item.id === input.taskId)
+      const leadId = task?.leadNodeId
+      if (leadId === undefined) return { failed: 'lead is not assigned' }
+      const watched = this.watchLeadReply(String(leadId), signal)
+      const text = [
+        `task: ${String(input.taskId)}`,
+        `iteration: ${String(input.iteration)}`,
+        'Apply these blocking findings or assign one Peer. Reply with the fix decision.',
+        ...input.findings.map(finding => `${finding.severity} ${String(finding.id)}: ${finding.summary}`),
+      ].join('\n')
+      let messageId: string
+      try {
+        messageId = String(await this.ctx.subagents.sendMessage(
+          this.callerAgent(caller),
+          SessionId(String(leadId)),
+          [{ type: 'text', text }],
+          { signal },
+        ))
+      } catch (error: unknown) {
+        watched.cancel()
+        return { failed: error instanceof Error ? error.message : String(error) }
+      }
+      const decision = await watched.done
+      if (decision === undefined) return { failed: `lead ${String(leadId)} did not report a fix after ${messageId}` }
+      return { decision, assigneeNodeId: leadId }
+    }
+  }
+
+  /**
+   * Watch the Lead session for an assistant reply that arrives after this call.
+   * The subscription is installed before `sendMessage`, so a synchronous append is included.
+   */
+  private watchLeadReply(leadId: string, signal: AbortSignal): { done: Promise<string | undefined>; cancel: () => void } {
+    const lead = this.ctx.agents.get(SessionId(leadId))
+    if (lead === undefined) return { done: Promise.resolve(undefined), cancel: () => {} }
+    let text: string | undefined
+    let settled = false
+    let stop = (): void => {}
+    const done = new Promise<string | undefined>((resolve, reject) => {
+      const finish = (): void => {
+        if (settled || text === undefined || lead.status !== 'idle') return
+        settled = true
+        stop()
+        resolve(text)
+      }
+      const stopEvent = this.ctx.on('session/event', (session, event) => {
+        if (session !== lead.session || event.type !== 'assistant/message') return
+        const next = assistantText(event.data)
+        if (next !== undefined) text = next
+        finish()
+      })
+      const stopStatus = this.ctx.on('agent/status', ({ agent }) => {
+        if (agent === lead) finish()
+      })
+      stop = (): void => {
+        stopEvent()
+        stopStatus()
+      }
+      const onAbort = (): void => {
+        if (settled) return
+        settled = true
+        stop()
+        reject(new Error('fix aborted'))
+      }
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    })
+    return {
+      done,
+      cancel: () => {
+        if (settled) return
+        settled = true
+        stop()
+      },
+    }
+  }
+
+  private enqueuePlanReview(session: Session, data: unknown): void {
+    this.planReviewChain = this.planReviewChain.then(async () => {
+      try {
+        await this.consumePlanReview(session, data)
+      } catch (error: unknown) {
+        this.ctx.logger.warn('dsh-experimental-orc: plan/review was not recorded: %o', error)
+      }
+    })
+  }
+
+  /** Copy an approved or rejected plan/review. Dismissed, plan/mode, and the wrong phase stay non-approval. */
+  private async consumePlanReview(session: Session, data: unknown): Promise<void> {
+    const review = readPlanReview(data)
+    if (review === undefined || review.decision === 'dismissed') return
+    const state = this.readState(session)
+    if (state.phase !== 'awaiting_user_approval' || state.runId === undefined || state.approval !== undefined) return
+    await this.commit(session, {
+      type: 'orc/plan/approval',
+      data: { version: 1, runId: state.runId, decision: review.decision, source: 'plan/review' },
+    })
   }
 
   /** Attach a handler before later commits, so a start that never reaches settlement still observes a rejection. */

@@ -82,7 +82,7 @@ Plan mode is a product package, not a capability seam: there is no swappable bac
 
 ### Durable state and step-boundary appends
 
-The package persists one log-only whole-value event, `plan/mode`, and the last logged value is the state. A mode change appends immediately when no turn is open; during an open turn it stays pending until the next accepted in-turn pre-step — the only append point while an agent runs — and an append failure cannot block the turn. The `set`/`get` service methods and their exact return states live in [`src/index.ts`](src/index.ts) and read the registered `plan` projection; the first dependent access fails explicitly when the registry or key is absent.
+The package persists one log-only whole-value event, `plan/mode`, and the last logged value is the state. `exit_plan_mode` also appends one log-only `plan/review` event with `version: 1`, the tool-call `correlation`, and `approved`, `rejected`, or `dismissed`. `/plan off` and a reload during review do not append `plan/review`. `plan/mode` staying inactive is not that decision. A mode change appends immediately when no turn is open; during an open turn it stays pending until the next accepted in-turn pre-step — the only append point while an agent runs — and an append failure cannot block the turn. The `set`/`get` service methods and their exact return states live in [`src/index.ts`](src/index.ts) and read the registered `plan` projection; the first dependent access fails explicitly when the registry or key is absent.
 
 ### The `/plan` command
 

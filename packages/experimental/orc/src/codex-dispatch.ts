@@ -14,6 +14,7 @@ import type {
   OrcDelegation,
   OrcFinding,
   OrcFindingInput,
+  OrcNodeId,
   OrcReportStatus,
   OrcReviewScope,
   OrcState,
@@ -37,7 +38,10 @@ export interface OrcFixRequest {
 }
 
 /** Fix step outcome. `failed` stops the loop. `decision` is the durable fix record. */
-export type OrcFixWorkResult = { readonly decision: string } | { readonly failed: string }
+export type OrcFixWorkResult = {
+  readonly decision: string
+  readonly assigneeNodeId?: OrcNodeId
+} | { readonly failed: string }
 
 /**
  * DeepSeek fix for one blocking gate.
@@ -94,11 +98,17 @@ export async function settleCodexRun(service: OrcService, caller: Agent, input: 
  * The service selects the route from config. This function does not name a model.
  * @param service - ORC service.
  * @param caller - Supervisor.
+ * @param contextRef - completed brainstorm or context reference.
  * @param signal - cancellation for the one-shot start.
  * @returns the projected run after the result is recorded.
  */
-export async function runCodexSpecPlan(service: OrcService, caller: Agent, signal: AbortSignal): Promise<OrcState> {
-  const launch = await service.startSpecPlan(caller, signal)
+export async function runCodexSpecPlan(
+  service: OrcService,
+  caller: Agent,
+  contextRef: string,
+  signal: AbortSignal,
+): Promise<OrcState> {
+  const launch = await service.startSpecPlan(caller, contextRef, signal)
   return service.awaitCodex(caller, launch.correlationId)
 }
 
@@ -262,7 +272,12 @@ async function repairTask(
     return service.fail(caller, error instanceof Error ? error.message : String(error))
   }
   if ('failed' in work) return service.fail(caller, work.failed)
-  await service.recordFix(caller, { taskId, iteration: task.iteration + 1, decision: work.decision })
+  await service.recordFix(caller, {
+    taskId,
+    iteration: task.iteration + 1,
+    decision: work.decision,
+    ...(work.assigneeNodeId === undefined ? {} : { assigneeNodeId: work.assigneeNodeId }),
+  })
   await service.advance(caller, 'task_review')
   return undefined
 }

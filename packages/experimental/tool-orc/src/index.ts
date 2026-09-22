@@ -358,13 +358,23 @@ function install(agent: Agent, ctx: Context): () => void {
 
     register(scoped.tools.register(defineTool({
       name: 'orc_request_spec_plan',
-      description: 'Start the next legal Codex spec or plan run. Only the Supervisor may call this.',
-      parameters: {},
+      description: 'Start the next Codex spec or plan run. This is the only transition into spec_required or plan_required. Only the Supervisor may call this.',
+      parameters: {
+        context_ref: {
+          type: 'string',
+          required: true,
+          description: 'Completed brainstorm or context reference. Prompt text cannot replace this argument.',
+        },
+      },
       output: jsonOutput(LAUNCH_SCHEMA),
-      async execute(_args, exec) {
+      async execute(args, exec) {
         const caller = requireAgent(exec.agent, 'orc_request_spec_plan')
         requireSupervisor(caller, 'invoke Codex')
-        const launch = await refused(() => ctx.orc.startSpecPlan(caller, exec.signal))
+        const launch = await refused(() => ctx.orc.startSpecPlan(
+          caller,
+          requiredText(args.context_ref, 'context reference'),
+          exec.signal,
+        ))
         return launchView({
           correlationId: String(launch.correlationId),
           kind: launch.kind,
@@ -374,22 +384,24 @@ function install(agent: Agent, ctx: Context): () => void {
       },
     })))
 
-    register(scoped.tools.register(defineTool({
-      name: 'orc_record_plan_decision',
-      description: 'Record a plan/review decision the caller already has. This tool does not decide approval.',
-      parameters: {
-        decision: { type: 'string', required: true, enum: ['approved', 'rejected'], description: 'Already-decided plan/review result.' },
-        source: { type: 'string', required: true, const: 'plan/review', description: 'Must be the plan/review source.' },
-      },
-      output: jsonOutput(STATE_SCHEMA),
-      async execute(args, exec) {
-        const caller = requireAgent(exec.agent, 'orc_record_plan_decision')
-        requireSupervisor(caller, 'approve a plan')
-        // ponytail: passes args.decision through; bind this to the plan/review event when that event exists.
-        const state = await refused(() => ctx.orc.approvePlan(caller, args.decision))
-        return stateView(state)
-      },
-    })))
+    const registerLoop = (toolName: 'orc_run_task_gates' | 'orc_run_final_gates', description: string): void => {
+      register(scoped.tools.register(defineTool({
+        name: toolName,
+        description,
+        parameters: {},
+        output: jsonOutput(STATE_SCHEMA),
+        async execute(_args, exec) {
+          const caller = requireAgent(exec.agent, toolName)
+          requireSupervisor(caller, 'invoke Codex')
+          const state = await refused(() => toolName === 'orc_run_task_gates'
+            ? ctx.orc.runTaskLoop(caller, exec.signal)
+            : ctx.orc.runFinalLoop(caller, exec.signal))
+          return stateView(state)
+        },
+      })))
+    }
+    registerLoop('orc_run_task_gates', 'Run task review, task audit, and the existing Lead fix until both gates are clean or one result blocks. Only the Supervisor may call this.')
+    registerLoop('orc_run_final_gates', 'Run branch review and branch audit. A blocking finding is sent to that task Lead. Only the Supervisor may call this.')
 
     register(scoped.tools.register(defineTool({
       name: 'orc_assign_task',

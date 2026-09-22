@@ -178,6 +178,16 @@ function peerInput(taskId: ReturnType<typeof OrcTaskId> = TASK) {
   return { ...leadInput(taskId), role: 'peer' as const, prompt: 'peer prompt', skillEnvelope: 'superpowers peer' }
 }
 
+
+async function userReview(
+  service: { planReviewSettled(): Promise<void> },
+  session: { append: (type: string, data: unknown) => unknown },
+  decision: 'approved' | 'rejected' = 'approved',
+): Promise<void> {
+  session.append('plan/review', { version: 1, correlation: 'plan-review-1', decision })
+  await service.planReviewSettled()
+}
+
 async function createRun(harness: Harness): Promise<void> {
   await harness.service.createWorkflow(harness.supervisor, {
     prompt: 'Supervisor prompt',
@@ -191,7 +201,7 @@ async function createRun(harness: Harness): Promise<void> {
 
 async function awaitingApproval(harness: Harness): Promise<void> {
   await createRun(harness)
-  const spec = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+  const spec = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.service.recordResult(harness.supervisor, {
     correlationId: spec.correlationId,
     stage: 'codex-spec',
@@ -199,8 +209,7 @@ async function awaitingApproval(harness: Harness): Promise<void> {
     status: 'ok',
     text: 'design spec',
   })
-  await harness.service.advance(harness.supervisor, 'plan_required', TASK)
-  const plan = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+  const plan = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.service.recordResult(harness.supervisor, {
     correlationId: plan.correlationId,
     stage: 'codex-plan',
@@ -213,7 +222,7 @@ async function awaitingApproval(harness: Harness): Promise<void> {
 
 async function implementing(harness: Harness): Promise<void> {
   await awaitingApproval(harness)
-  await harness.service.approvePlan(harness.supervisor, 'approved')
+  await userReview(harness.service, harness.supervisor.session)
   await harness.service.assignTask(harness.supervisor, {
     taskId: TASK,
     writeScope: ['src'],
@@ -271,6 +280,7 @@ describe('ORC service role tree', () => {
       version: 1,
       runId,
       correlationId: 'bare-spec',
+      contextRef: 'brainstorm-1',
       role: 'spec-only',
       repositoryPath: '/repo/orc',
       skillRequirements: 'superpowers workflow',
@@ -361,11 +371,11 @@ describe('ORC supervisor authority', () => {
     const harness = await setup()
     await createRun(harness)
     const intruder = { id: SessionId('intruder'), session: harness.supervisor.session, options: {} } as Agent
-    await expect(harness.service.startSpecPlan(intruder, SIGNAL)).rejects.toThrow(/only the supervisor/)
+    await expect(harness.service.startSpecPlan(intruder, 'brainstorm-1', SIGNAL)).rejects.toThrow(/only the supervisor/)
     expect(harness.fake.oneShot).toHaveLength(0)
     expect(harness.service.state(harness.supervisor).phase).toBe('brainstorming')
 
-    const spec = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const spec = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     await harness.service.recordResult(harness.supervisor, {
       correlationId: spec.correlationId,
       stage: 'codex-spec',
@@ -373,8 +383,7 @@ describe('ORC supervisor authority', () => {
       status: 'ok',
       text: 'design spec',
     })
-    await harness.service.advance(harness.supervisor, 'plan_required', TASK)
-    const plan = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const plan = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     await harness.service.recordResult(harness.supervisor, {
       correlationId: plan.correlationId,
       stage: 'codex-plan',
@@ -383,7 +392,10 @@ describe('ORC supervisor authority', () => {
       text: 'implementation plan',
     })
     await harness.service.advance(harness.supervisor, 'awaiting_user_approval')
-    await expect(harness.service.approvePlan(intruder, 'approved')).rejects.toThrow(/only the supervisor/)
+    const mode = harness.supervisor.session.append.bind(harness.supervisor.session) as (type: string, data: unknown) => void
+    mode('plan/mode', { active: false })
+    await harness.service.planReviewSettled()
+    expect(harness.service.state(harness.supervisor).approval).toBeUndefined()
     await expect(harness.service.assignTask(intruder, {
       taskId: TASK,
       writeScope: ['src'],
@@ -391,7 +403,7 @@ describe('ORC supervisor authority', () => {
     })).rejects.toThrow(/only the supervisor/)
     expect(harness.service.state(harness.supervisor).approval).toBeUndefined()
     expect(harness.service.state(harness.supervisor).tasks).toEqual([])
-    await harness.service.approvePlan(harness.supervisor, 'approved')
+    await userReview(harness.service, harness.supervisor.session)
     expect(harness.service.state(harness.supervisor).approval).toBe('approved')
   })
 })
@@ -400,7 +412,7 @@ describe('ORC delegated results', () => {
   it('ignores child output until the run, task, stage, and role match', async () => {
     const harness = await setup()
     await createRun(harness)
-    const launch = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const launch = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(launch.spawned).toBe(true)
     expect(launch.kind).toBe('codex-spec')
     expect(harness.service.state(harness.supervisor).phase).toBe('spec_required')
@@ -429,6 +441,7 @@ describe('ORC delegated results', () => {
         'provider: codex-spec-route',
         'model: spec-route-model',
         'effort: spec-route-effort',
+        'contextRef: brainstorm-1',
       ].join('\n'),
     }])
     await Promise.resolve()
@@ -487,8 +500,7 @@ describe('ORC delegated results', () => {
       text: 'design spec',
     })
     expect(harness.service.state(harness.supervisor).specText).toBe('design spec')
-    await harness.service.advance(harness.supervisor, 'plan_required', TASK)
-    const plan = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const plan = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     await expect(harness.service.recordResult(harness.supervisor, {
       correlationId: plan.correlationId,
       stage: 'codex-plan',
@@ -519,7 +531,7 @@ describe('ORC delegated results', () => {
     const harness = await setup()
     await createRun(harness)
     harness.fake.failOneShot = true
-    await expect(harness.service.startSpecPlan(harness.supervisor, SIGNAL)).rejects.toThrow(/one-shot start failed/)
+    await expect(harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/one-shot start failed/)
     expect(harness.fake.oneShot).toHaveLength(0)
     let state = harness.service.state(harness.supervisor)
     expect(state.phase).toBe('spec_required')
@@ -530,7 +542,7 @@ describe('ORC delegated results', () => {
     void rejected.catch(() => undefined)
     harness.fake.failOneShot = false
     harness.fake.oneShotResult = rejected
-    const retry = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const retry = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     state = await harness.service.awaitCodex(harness.supervisor, retry.correlationId)
     expect(retry.spawned).toBe(true)
     expect(state.specText).toBeUndefined()
@@ -538,7 +550,7 @@ describe('ORC delegated results', () => {
     await expect(harness.service.advance(harness.supervisor, 'plan_required')).rejects.toThrow(/failure/)
 
     harness.fake.oneShotResult = new Promise(() => {})
-    const missing = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const missing = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     await harness.service.recordResult(harness.supervisor, {
       correlationId: missing.correlationId,
       stage: 'codex-spec',
@@ -643,19 +655,19 @@ describe('ORC delegated results', () => {
       return (specAppendOriginal as (eventType: string, eventData: unknown) => unknown)(type, data)
     }) as Session['append']
     specAppend.fake.failOneShot = true
-    await expect(specAppend.service.startSpecPlan(specAppend.supervisor, SIGNAL)).rejects.toBeInstanceOf(AggregateError)
+    await expect(specAppend.service.startSpecPlan(specAppend.supervisor, 'brainstorm-1', SIGNAL)).rejects.toBeInstanceOf(AggregateError)
     expect(specAppend.service.state(specAppend.supervisor).delegations[0]?.status).toBe('open')
     expect(specAppend.service.state(specAppend.supervisor).delegations[0]?.continuationId).toBeUndefined()
     specSession.append = specAppendOriginal
     specAppend.fake.failOneShot = false
-    await expect(specAppend.service.startSpecPlan(specAppend.supervisor, SIGNAL)).rejects.toThrow(/no continuation handle/)
+    await expect(specAppend.service.startSpecPlan(specAppend.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/no continuation handle/)
     expect(specAppend.service.state(specAppend.supervisor).delegations[0]).toMatchObject({
       status: 'failed',
       blocksProgress: true,
     })
     expect(specAppend.service.state(specAppend.supervisor).phase).toBe('spec_required')
     expect(specAppend.fake.oneShot).toHaveLength(0)
-    const retry = await specAppend.service.startSpecPlan(specAppend.supervisor, SIGNAL)
+    const retry = await specAppend.service.startSpecPlan(specAppend.supervisor, 'brainstorm-1', SIGNAL)
     expect(retry.spawned).toBe(true)
     expect(retry.correlationId).not.toBe(specAppend.service.state(specAppend.supervisor).delegations[0]?.correlationId)
 
@@ -710,13 +722,13 @@ describe('ORC delegated results', () => {
     await createRun(flushed)
     const persistence = flushed.ctx.get('sessionPersistence') as FakePersistence
     persistence.flushFailure = new Error('flush failed')
-    await expect(flushed.service.startSpecPlan(flushed.supervisor, SIGNAL)).rejects.toThrow(/flush failed/)
+    await expect(flushed.service.startSpecPlan(flushed.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/flush failed/)
     expect(flushed.service.state(flushed.supervisor).phase).toBe('spec_required')
     expect(flushed.service.state(flushed.supervisor).delegations.at(-1)).toMatchObject({
       status: 'failed',
       blocksProgress: true,
     })
-    const again = await flushed.service.startSpecPlan(flushed.supervisor, SIGNAL)
+    const again = await flushed.service.startSpecPlan(flushed.supervisor, 'brainstorm-1', SIGNAL)
     expect(again.spawned).toBe(true)
     expect(flushed.fake.oneShot).toHaveLength(2)
 
@@ -732,13 +744,13 @@ describe('ORC delegated results', () => {
       }
       return (phaseAppend as (eventType: string, eventData: unknown) => unknown)(type, data)
     }) as Session['append']
-    await expect(phased.service.startSpecPlan(phased.supervisor, SIGNAL)).rejects.toThrow(/phase append failed/)
+    await expect(phased.service.startSpecPlan(phased.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/phase append failed/)
     expect(phased.service.state(phased.supervisor).phase).toBe('spec_required')
     expect(phased.service.state(phased.supervisor).delegations.at(-1)).toMatchObject({
       status: 'failed',
       blocksProgress: true,
     })
-    const retried = await phased.service.startSpecPlan(phased.supervisor, SIGNAL)
+    const retried = await phased.service.startSpecPlan(phased.supervisor, 'brainstorm-1', SIGNAL)
     expect(retried.spawned).toBe(true)
   })
 
@@ -752,6 +764,7 @@ describe('ORC delegated results', () => {
       version: 1,
       runId,
       correlationId: 'partial-spec',
+      contextRef: 'brainstorm-1',
       role: 'spec-only',
       repositoryPath: '/repo/orc',
       skillRequirements: 'superpowers workflow',
@@ -759,11 +772,11 @@ describe('ORC delegated results', () => {
       readOnly: true,
     })
     expect(spec.service.registration(spec.supervisor, OrcCorrelationId('partial-spec'))?.continuation).toBeUndefined()
-    await expect(spec.service.startSpecPlan(spec.supervisor, SIGNAL)).rejects.toThrow(/no continuation handle/)
+    await expect(spec.service.startSpecPlan(spec.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/no continuation handle/)
     expect(spec.fake.oneShot).toHaveLength(0)
     expect(spec.service.state(spec.supervisor).delegations[0]).toMatchObject({ status: 'failed', blocksProgress: true })
     expect(spec.service.state(spec.supervisor).phase).toBe('spec_required')
-    const started = await spec.service.startSpecPlan(spec.supervisor, SIGNAL)
+    const started = await spec.service.startSpecPlan(spec.supervisor, 'brainstorm-1', SIGNAL)
     expect(started.spawned).toBe(true)
     expect(spec.service.state(spec.supervisor).delegations.at(-1)?.continuationId).toBe('shot-1')
     await spec.service.recordResult(spec.supervisor, {
@@ -773,18 +786,18 @@ describe('ORC delegated results', () => {
       status: 'ok',
       text: 'design spec',
     })
-    await spec.service.advance(spec.supervisor, 'plan_required')
     appendSpec('orc/plan/requested', {
       version: 1,
       runId,
       correlationId: 'partial-plan',
+      contextRef: 'brainstorm-1',
       role: 'plan-only',
       repositoryPath: '/repo/orc',
       skillRequirements: 'superpowers workflow',
       outputSchema: 'plan-schema',
       readOnly: true,
     })
-    await expect(spec.service.startSpecPlan(spec.supervisor, SIGNAL)).rejects.toThrow(/no continuation handle/)
+    await expect(spec.service.startSpecPlan(spec.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/no continuation handle/)
     expect(spec.fake.oneShot).toHaveLength(1)
     expect(spec.service.state(spec.supervisor).delegations.find(item => item.correlationId === OrcCorrelationId('partial-plan'))).toMatchObject({
       status: 'failed',
@@ -849,14 +862,14 @@ describe('ORC resume and later gates', () => {
   it('reconstructs an open Codex run from the session log without a second child', async () => {
     const harness = await setup()
     await createRun(harness)
-    const launch = await harness.service.startSpecPlan(harness.supervisor, SIGNAL)
+    const launch = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(harness.fake.oneShot).toHaveLength(1)
     expect(harness.service.state(harness.supervisor).phase).toBe('spec_required')
     await harness.fiber.dispose()
     expect(() => harness.service.state(harness.supervisor)).toThrow(/ORC projection is not registered/)
     await harness.ctx.plugin(OrcService, CONFIG)
     const resumed = harness.ctx.orc
-    const again = await resumed.startSpecPlan(harness.supervisor, SIGNAL)
+    const again = await resumed.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
     expect(again.spawned).toBe(false)
     expect(again.correlationId).toBe(launch.correlationId)
     expect(harness.fake.oneShot).toHaveLength(1)
@@ -1003,7 +1016,9 @@ describe('ORC resume and later gates', () => {
     })
     expect(harness.service.state(harness.supervisor).tasks[0]).toMatchObject({ iteration: 1, fixDecision: 'fix bounds' })
 
-    await expect(harness.service.approvePlan(harness.supervisor, 'approved')).rejects.toThrow(/awaiting user approval/)
+    await userReview(harness.service, harness.supervisor.session)
+    expect(harness.service.state(harness.supervisor).phase).not.toBe('awaiting_user_approval')
+    expect(harness.service.state(harness.supervisor).approval).toBe('approved')
     await harness.service.fail(harness.supervisor, 'stop the run')
     expect(harness.service.state(harness.supervisor).phase).toBe('failed')
     expect(harness.service.state(harness.supervisor).terminalReason).toBe('stop the run')
@@ -1013,8 +1028,8 @@ describe('ORC resume and later gates', () => {
     const harness = await setup()
     await awaitingApproval(harness)
     expect(harness.supervisor.session.snapshotEvents().some(event => event.type === 'plan/mode')).toBe(false)
-    await expect(harness.service.startSpecPlan(harness.supervisor, SIGNAL)).rejects.toThrow(/not allowed|already requested/)
-    await harness.service.approvePlan(harness.supervisor, 'rejected')
+    await expect(harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/not allowed|already requested/)
+    await userReview(harness.service, harness.supervisor.session, 'rejected')
     await expect(harness.service.assignTask(harness.supervisor, {
       taskId: TASK,
       writeScope: ['src'],

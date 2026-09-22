@@ -200,6 +200,7 @@ const specRequestedSchema = z.object({
   version: z.literal(1),
   runId: runIdSchema,
   correlationId: correlationIdSchema,
+  contextRef: z.string().min(1),
   ...codexFields('spec-only'),
 }).strict()
 
@@ -216,6 +217,7 @@ const planRequestedSchema = z.object({
   version: z.literal(1),
   runId: runIdSchema,
   correlationId: correlationIdSchema,
+  contextRef: z.string().min(1),
   ...codexFields('plan-only'),
 }).strict()
 
@@ -434,7 +436,7 @@ function reduceOrcEvent(state: OrcState, event: OrcEvent): OrcState {
     case 'orc/spec/result':
       return recordCodexText(state, event, 'codex-spec', 'spec_required', 'specText')
     case 'orc/plan/requested':
-      return requestCodex(state, event, 'codex-plan', ['plan_required'])
+      return requestCodex(state, event, 'codex-plan', ['spec_required', 'plan_required'])
     case 'orc/plan/result':
       return recordCodexText(state, event, 'codex-plan', 'plan_required', 'planText')
     case 'orc/plan/approval':
@@ -606,6 +608,11 @@ function requestCodex(
     const label = kind === 'codex-spec' ? 'codex spec' : 'codex plan'
     return refuse(state, `${label} request is not allowed in this phase`)
   }
+  if (kind === 'codex-plan' && state.phase === 'spec_required') {
+    const spec = latestDelegation(state, 'codex-spec')
+    if (spec === undefined || spec.status === 'open') return refuse(state, 'codex spec result is missing')
+    if (spec.status !== 'ok') return refuse(state, 'codex spec failure blocks plan')
+  }
   if (state.delegations.some(item => item.kind === kind && (item.status === 'open' || item.status === 'ok'))) {
     const label = kind === 'codex-spec' ? 'codex spec' : 'codex plan'
     return refuse(state, `${label} is already requested`)
@@ -623,6 +630,7 @@ function requestCodex(
     outputSchema: data.outputSchema,
     readOnly: true,
     findingIds: [],
+    contextRef: data.contextRef,
     ...(data.continuationId === undefined ? {} : { continuationId: data.continuationId }),
     ...selectionOf(data),
   }
@@ -1034,8 +1042,11 @@ function phaseBlock(
   switch (from) {
     case 'brainstorming':
       return state.delegations.some(item => item.kind === 'codex-spec') ? undefined : 'codex spec request is missing'
-    case 'spec_required':
-      return textResultBlock(state, 'codex-spec', 'codex spec result is missing', 'codex spec failure blocks plan')
+    case 'spec_required': {
+      const text = textResultBlock(state, 'codex-spec', 'codex spec result is missing', 'codex spec failure blocks plan')
+      if (text !== undefined) return text
+      return state.delegations.some(item => item.kind === 'codex-plan') ? undefined : 'codex plan request is missing'
+    }
     case 'plan_required':
       return textResultBlock(state, 'codex-plan', 'codex plan result is missing', 'codex plan failure blocks approval')
     case 'awaiting_user_approval':
