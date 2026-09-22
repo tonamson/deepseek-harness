@@ -59,16 +59,20 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Latest version-1 `plan/review` on one session. `null` means none has been logged. */
+/** Latest version-1 `plan/review` and the seq of the latest ok plan result. */
 export interface OrcPlanReviewState {
-  readonly correlation: string
-  readonly decision: 'approved' | 'rejected' | 'dismissed'
+  readonly planResultSeq: number | null
+  readonly review: {
+    readonly seq: number
+    readonly correlation: string
+    readonly decision: 'approved' | 'rejected' | 'dismissed'
+  } | null
 }
 
 declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionStateMap {
     orc: OrcState
-    orcPlanReview: OrcPlanReviewState | null
+    orcPlanReview: OrcPlanReviewState
   }
 }
 
@@ -210,14 +214,22 @@ const orcProjectionDefinition = {
 
 const orcPlanReviewProjection = {
   key: 'orcPlanReview' as const,
-  stateVersion: 1,
-  stateSchema: z.custom<OrcPlanReviewState | null>(),
-  init(): OrcPlanReviewState | null {
-    return null
+  stateVersion: 2,
+  stateSchema: z.custom<OrcPlanReviewState>(),
+  init(): OrcPlanReviewState {
+    return { planResultSeq: null, review: null }
   },
-  apply(state: OrcPlanReviewState | null, event: SessionEvent): OrcPlanReviewState | null {
-    if ((event as { type: string }).type !== 'plan/review') return state
-    return readPlanReview(event.data) ?? state
+  apply(state: OrcPlanReviewState, event: SessionEvent): OrcPlanReviewState {
+    const type = (event as { type: string }).type
+    if (type === 'orc/plan/result') {
+      const status = (event.data as { status?: unknown }).status
+      if (status !== 'ok') return state
+      return { ...state, planResultSeq: event.seq }
+    }
+    if (type !== 'plan/review') return state
+    const review = readPlanReview(event.data)
+    if (review === undefined) return state
+    return { ...state, review: { seq: event.seq, correlation: review.correlation, decision: review.decision } }
   },
 }
 
@@ -300,14 +312,11 @@ export class OrcService extends Service {
       const disposeProjection = ctx.sessionProjections.register(orcProjectionDefinition)
       const disposeReview = ctx.sessionProjections.register(orcPlanReviewProjection)
       const stop = ctx.on('session/event', (session, event) => {
-        if ((event as { type: string }).type !== 'plan/review') return
-        this.enqueuePlanReview(session, event.data)
+        const type = (event as { type: string }).type
+        if (type !== 'plan/review' && type !== 'orc/plan/result' && type !== 'orc/phase') return
+        this.enqueuePlanReview(session, event)
       })
-      for (const session of ctx.sessions.list()) {
-        const review = ctx.sessionProjections.stateOf(session, 'orcPlanReview')
-        if (review === undefined || review === null) continue
-        this.enqueuePlanReview(session, { version: 1, correlation: review.correlation, decision: review.decision })
-      }
+      for (const session of ctx.sessions.list()) this.enqueuePlanReview(session)
       return () => {
         stop()
         disposeReview()
@@ -484,6 +493,7 @@ export class OrcService extends Service {
     readonly acceptanceCriteria: string
   }): Promise<OrcState> {
     this.requireSupervisorCaller(caller)
+    await this.planReviewSettled()
     const session = this.sessionFor(caller)
     return this.commit(session, {
       type: 'orc/task/assigned',
@@ -504,6 +514,7 @@ export class OrcService extends Service {
    * @returns the correlated node.
    */
   async spawn(caller: Agent, input: OrcSpawnInput): Promise<OrcLaunch> {
+    if (input.role === 'lead') await this.planReviewSettled()
     const actor = this.callerAgent(caller)
     const session = this.sessionFor(actor)
     const state = this.readState(session)
@@ -693,9 +704,10 @@ export class OrcService extends Service {
    * @returns the projected run.
    */
   async advance(caller: Agent, to: OrcWorkflowPhase, taskId?: OrcTaskId): Promise<OrcState> {
+    if (to === 'task_implementation') await this.planReviewSettled()
     const actor = this.callerAgent(caller)
     const session = this.sessionFor(actor)
-    return this.commit(session, {
+    const state = await this.commit(session, {
       type: 'orc/phase',
       data: {
         version: 1,
@@ -705,6 +717,11 @@ export class OrcService extends Service {
         ...(taskId === undefined ? {} : { taskId }),
       },
     })
+    if (to === 'awaiting_user_approval') {
+      await this.planReviewSettled()
+      return this.readState(session)
+    }
+    return state
   }
 
   /**
@@ -1099,7 +1116,13 @@ export class OrcService extends Service {
         `task: ${String(input.taskId)}`,
         `iteration: ${String(input.iteration)}`,
         'Apply these blocking findings or assign one Peer. Reply with the fix decision.',
-        ...input.findings.map(finding => `${finding.severity} ${String(finding.id)}: ${finding.summary}`),
+        ...input.findings.map(finding => [
+          `${finding.severity} ${String(finding.id)}: ${finding.summary}`,
+          ...(finding.file === undefined ? [] : [`file: ${finding.file}`]),
+          ...(finding.location === undefined ? [] : [`location: ${finding.location}`]),
+          ...(finding.evidence === undefined ? [] : [`evidence: ${finding.evidence}`]),
+          ...(finding.remediation === undefined ? [] : [`remediation: ${finding.remediation}`]),
+        ].join('\n')),
       ].join('\n')
       let messageId: string
       try {
@@ -1113,6 +1136,7 @@ export class OrcService extends Service {
         watched.cancel()
         return { failed: error instanceof Error ? error.message : String(error) }
       }
+      watched.admit()
       const decision = await watched.done
       if (decision === undefined) return { failed: `lead ${String(leadId)} did not report a fix after ${messageId}` }
       return { decision, assigneeNodeId: leadId }
@@ -1120,27 +1144,36 @@ export class OrcService extends Service {
   }
 
   /**
-   * Watch the Lead session for an assistant reply that arrives after this call.
-   * The subscription is installed before `sendMessage`, so a synchronous append is included.
+   * Watch the Lead for a reply that arrives after `sendMessage` is admitted.
+   * Assistant events before admission are ignored. The next idle after admission
+   * resolves that text, or fails the fix when the Lead went idle without it.
    */
-  private watchLeadReply(leadId: string, signal: AbortSignal): { done: Promise<string | undefined>; cancel: () => void } {
+  private watchLeadReply(leadId: string, signal: AbortSignal): {
+    done: Promise<string | undefined>
+    admit: () => void
+    cancel: () => void
+  } {
     const lead = this.ctx.agents.get(SessionId(leadId))
-    if (lead === undefined) return { done: Promise.resolve(undefined), cancel: () => {} }
+    if (lead === undefined) {
+      return { done: Promise.resolve(undefined), admit: () => {}, cancel: () => {} }
+    }
+    let admitted = false
     let text: string | undefined
     let settled = false
     let stop = (): void => {}
+    let resolveDone: (value: string | undefined) => void = () => {}
     const done = new Promise<string | undefined>((resolve, reject) => {
+      resolveDone = resolve
       const finish = (): void => {
-        if (settled || text === undefined || lead.status !== 'idle') return
+        if (!admitted || settled || lead.status !== 'idle') return
         settled = true
         stop()
         resolve(text)
       }
       const stopEvent = this.ctx.on('session/event', (session, event) => {
-        if (session !== lead.session || event.type !== 'assistant/message') return
+        if (!admitted || session !== lead.session || event.type !== 'assistant/message') return
         const next = assistantText(event.data)
         if (next !== undefined) text = next
-        finish()
       })
       const stopStatus = this.ctx.on('agent/status', ({ agent }) => {
         if (agent === lead) finish()
@@ -1160,33 +1193,77 @@ export class OrcService extends Service {
     })
     return {
       done,
+      admit: () => {
+        admitted = true
+      },
       cancel: () => {
         if (settled) return
         settled = true
         stop()
+        resolveDone(undefined)
       },
     }
   }
 
-  private enqueuePlanReview(session: Session, data: unknown): void {
-    this.planReviewChain = this.planReviewChain.then(async () => {
-      try {
-        await this.consumePlanReview(session, data)
-      } catch (error: unknown) {
-        this.ctx.logger.warn('dsh-experimental-orc: plan/review was not recorded: %o', error)
-      }
-    })
+  private enqueuePlanReview(session: Session, event?: SessionEvent): void {
+    // A failed record rejects the promise planReviewSettled already returned. Later events still run.
+    this.planReviewChain = this.planReviewChain
+      .then(() => undefined, () => undefined)
+      .then(() => this.applyStoredReview(session, event))
   }
 
-  /** Copy an approved or rejected plan/review. Dismissed, plan/mode, and the wrong phase stay non-approval. */
-  private async consumePlanReview(session: Session, data: unknown): Promise<void> {
-    const review = readPlanReview(data)
-    if (review === undefined || review.decision === 'dismissed') return
-    const state = this.readState(session)
-    if (state.phase !== 'awaiting_user_approval' || state.runId === undefined || state.approval !== undefined) return
+  /**
+   * Record the latest post-plan `plan/review`.
+   * A review at or before the ok plan result is ignored. Dismissed is not approval.
+   * A review that arrives in `plan_required` after an ok plan enters `awaiting_user_approval` and is recorded.
+   * A later `approved` review replaces `rejected`. A failed record rejects `planReviewSettled`.
+   */
+  private async applyStoredReview(session: Session, event?: SessionEvent): Promise<void> {
+    const stored = this.ctx.sessionProjections.stateOf(session, 'orcPlanReview')
+    let planResultSeq = stored?.planResultSeq ?? null
+    let review = stored?.review ?? null
+    const eventType = event === undefined ? undefined : (event as { type: string }).type
+    if (event !== undefined && eventType === 'orc/plan/result' && (event.data as { status?: unknown }).status === 'ok') {
+      planResultSeq = planResultSeq === null ? event.seq : Math.max(planResultSeq, event.seq)
+    }
+    if (event !== undefined && eventType === 'plan/review') {
+      const parsed = readPlanReview(event.data)
+      if (parsed !== undefined && (review === null || event.seq >= review.seq)) {
+        review = { seq: event.seq, correlation: parsed.correlation, decision: parsed.decision }
+      }
+    }
+    if (review === null || planResultSeq === null) return
+    if (review.decision !== 'approved' && review.decision !== 'rejected') return
+    if (review.seq <= planResultSeq) return
+    let state = this.readState(session)
+    const runId = state.runId
+    if (runId === undefined) return
+    const plan = [...state.delegations].reverse().find(item => item.kind === 'codex-plan')
+    if (plan === undefined || plan.status !== 'ok') return
+    if (state.phase === 'plan_required') {
+      const actor = state.nodes.find(node => node.role === 'supervisor')
+      if (actor === undefined) throw new OrcError('supervisor root is required')
+      state = await this.commit(session, {
+        type: 'orc/phase',
+        data: { version: 1, runId, to: 'awaiting_user_approval', actorNodeId: actor.id },
+      })
+    }
+    if (state.phase !== 'awaiting_user_approval') return
+    if (state.approval === review.decision
+      && state.approvalCorrelation === review.correlation
+      && state.approvalReviewSeq === review.seq) return
+    if (state.approval === 'approved') return
+    if (state.approval === 'rejected' && (review.decision !== 'approved' || review.seq <= (state.approvalReviewSeq ?? -1))) return
     await this.commit(session, {
       type: 'orc/plan/approval',
-      data: { version: 1, runId: state.runId, decision: review.decision, source: 'plan/review' },
+      data: {
+        version: 1,
+        runId,
+        decision: review.decision,
+        source: 'plan/review',
+        correlation: review.correlation,
+        reviewSeq: review.seq,
+      },
     })
   }
 

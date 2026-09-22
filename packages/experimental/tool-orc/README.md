@@ -119,7 +119,7 @@ A phase, task, or role change rewrites `orc:role` and invalidates the system pre
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Approval is not a tool** — the service copies `approved` or `rejected` only from a version-1 `plan/review` event on the Supervisor session. `dismissed`, `/plan off`, and `plan/mode` do not approve.
+- **Approval is not a tool** — the service copies `approved` or `rejected` only from a version-1 `plan/review` event on the Supervisor session whose seq is after the ok plan result, and copies that correlation. A later `approved` review replaces `rejected`. `dismissed`, `/plan off`, a missing question channel, and `plan/mode` do not approve.
 - **Prompt text is not authority** — the section tells the model its role. `OrcService` still refuses a Peer spawn or phase change.
 - **Native Codex children are outside DSH** — they do not inherit skills, tools, or session context. Only the envelope text reaches them.
 - **Experimental prototype with no stability promise** — schemas can change while the package incubates.

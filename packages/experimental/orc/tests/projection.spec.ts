@@ -133,7 +133,7 @@ function planResult(): OrcEvent {
 function approval(decision: 'approved' | 'rejected'): OrcEvent {
   return {
     type: 'orc/plan/approval',
-    data: { version: 1, runId: RUN, decision, source: 'plan/review' },
+    data: { version: 1, runId: RUN, decision, source: 'plan/review', correlation: 'plan-review-1', reviewSeq: 8 },
   }
 }
 
@@ -368,6 +368,50 @@ describe('ORC transition gates', () => {
     const state = events.reduce(applyOrc, emptyOrcState())
     expect(state.failure).toMatch(/plan approval is required before implementation/)
     expect(state.phase).toBe('awaiting_user_approval')
+  })
+
+  it('lets a later approved review replace a rejection', () => {
+    const rejected = projectOrc([
+      ...throughAwaiting(),
+      approval('rejected'),
+    ])
+    expect(rejected.approval).toBe('rejected')
+    const replaced = projectOrc([
+      ...throughAwaiting(),
+      approval('rejected'),
+      {
+        type: 'orc/plan/approval',
+        data: {
+          version: 1,
+          runId: RUN,
+          decision: 'approved',
+          source: 'plan/review',
+          correlation: 'plan-review-2',
+          reviewSeq: 9,
+        },
+      },
+    ])
+    expect(replaced.failure).toBeUndefined()
+    expect(replaced.approval).toBe('approved')
+    expect(replaced.approvalCorrelation).toBe('plan-review-2')
+    expect(replaced.approvalReviewSeq).toBe(9)
+    const stale = projectOrc([
+      ...throughAwaiting(),
+      approval('rejected'),
+      {
+        type: 'orc/plan/approval',
+        data: {
+          version: 1,
+          runId: RUN,
+          decision: 'approved',
+          source: 'plan/review',
+          correlation: 'plan-review-0',
+          reviewSeq: 8,
+        },
+      },
+    ])
+    expect(stale.failure).toMatch(/already recorded/)
+    expect(stale.approval).toBe('rejected')
   })
 
   it('keeps a rejected plan in awaiting_user_approval and creates no lead', () => {

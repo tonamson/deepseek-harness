@@ -119,7 +119,7 @@ mandatory Superpowers skills: test-driven-development, verification-before-compl
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **批准不是工具** — 服务只从 Supervisor 会话上的 version-1 `plan/review` 复制 `approved` 或 `rejected`。`dismissed`、`/plan off` 与 `plan/mode` 都不会批准。
+- **批准不是工具** — 服务只从 Supervisor 会话上、seq 晚于 ok plan result 的 version-1 `plan/review` 复制 `approved` 或 `rejected`，并复制该 correlation。更晚的 `approved` review 会替换 `rejected`。`dismissed`、`/plan off`、缺失的提问通道与 `plan/mode` 都不会批准。
 - **提示文本不是权限** — 段落告诉模型它的角色。Peer 的 spawn 或阶段变化仍由 `OrcService` 拒绝。
 - **原生 Codex 子运行在 DSH 之外** — 它们不继承 skills、工具或会话上下文。只有信封文本会到达它们。
 - **实验性原型，没有稳定性承诺** — schema 在孵化期间可以改变。

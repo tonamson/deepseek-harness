@@ -186,7 +186,7 @@ function throughTaskReview(): OrcEvent[] {
     phase('plan_required'),
     planResult(),
     phase('awaiting_user_approval'),
-    { type: 'orc/plan/approval', data: { version: 1, runId: RUN, decision: 'approved', source: 'plan/review' } },
+    { type: 'orc/plan/approval', data: { version: 1, runId: RUN, decision: 'approved', source: 'plan/review', correlation: 'plan-review-1', reviewSeq: 8 } },
     taskAssigned(TASK_A),
     taskAssigned(TASK_B),
     phase('task_implementation'),

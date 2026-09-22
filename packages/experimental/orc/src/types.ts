@@ -183,6 +183,10 @@ export interface OrcState {
   readonly findings: readonly OrcFinding[]
   readonly delegations: readonly OrcDelegation[]
   readonly approval?: 'approved' | 'rejected'
+  /** `plan/review` correlation copied onto the approval that is in force. */
+  readonly approvalCorrelation?: string
+  /** Session seq of the `plan/review` that produced `approval`. */
+  readonly approvalReviewSeq?: number
   readonly specText?: string
   readonly planText?: string
   readonly terminalReason?: string
@@ -300,6 +304,10 @@ export interface OrcPlanApproval {
   readonly runId: OrcRunId
   readonly decision: 'approved' | 'rejected'
   readonly source: 'plan/review'
+  /** Tool-call correlation from the `plan/review` event. */
+  readonly correlation: string
+  /** Session seq of that `plan/review` event. It must be after the ok plan result. */
+  readonly reviewSeq: number
 }
 
 /** Version-1 task assignment. */

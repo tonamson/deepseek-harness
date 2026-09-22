@@ -235,6 +235,8 @@ const planApprovalSchema = z.object({
   runId: runIdSchema,
   decision: z.enum(['approved', 'rejected']),
   source: z.literal('plan/review'),
+  correlation: z.string().min(1),
+  reviewSeq: z.number().int().nonnegative(),
 }).strict()
 
 const taskAssignedSchema = z.object({
@@ -688,8 +690,26 @@ function approvePlan(state: OrcState, event: Extract<OrcEvent, { type: 'orc/plan
   const plan = latestDelegation(state, 'codex-plan')
   if (plan === undefined || plan.status === 'open') return refuse(state, 'codex plan result is missing')
   if (plan.status !== 'ok') return refuse(state, 'codex plan failure blocks approval')
+  if (state.approval === data.decision
+    && state.approvalCorrelation === data.correlation
+    && state.approvalReviewSeq === data.reviewSeq) {
+    return state
+  }
+  if (state.approval === 'rejected' && data.decision === 'approved' && data.reviewSeq > (state.approvalReviewSeq ?? -1)) {
+    return {
+      ...state,
+      approval: 'approved',
+      approvalCorrelation: data.correlation,
+      approvalReviewSeq: data.reviewSeq,
+    }
+  }
   if (state.approval !== undefined) return refuse(state, 'plan approval is already recorded')
-  return { ...state, approval: data.decision }
+  return {
+    ...state,
+    approval: data.decision,
+    approvalCorrelation: data.correlation,
+    approvalReviewSeq: data.reviewSeq,
+  }
 }
 
 /** Assign one implementation task after approval and before the first Lead. */

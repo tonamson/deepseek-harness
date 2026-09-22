@@ -199,7 +199,7 @@ async function createRun(harness: Harness): Promise<void> {
   })
 }
 
-async function awaitingApproval(harness: Harness): Promise<void> {
+async function planReady(harness: Harness): Promise<void> {
   await createRun(harness)
   const spec = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.service.recordResult(harness.supervisor, {
@@ -217,6 +217,11 @@ async function awaitingApproval(harness: Harness): Promise<void> {
     status: 'ok',
     text: 'implementation plan',
   })
+  expect(harness.service.state(harness.supervisor).phase).toBe('plan_required')
+}
+
+async function awaitingApproval(harness: Harness): Promise<void> {
+  await planReady(harness)
   await harness.service.advance(harness.supervisor, 'awaiting_user_approval')
 }
 
@@ -405,6 +410,95 @@ describe('ORC supervisor authority', () => {
     expect(harness.service.state(harness.supervisor).tasks).toEqual([])
     await userReview(harness.service, harness.supervisor.session)
     expect(harness.service.state(harness.supervisor).approval).toBe('approved')
+  })
+
+  it('records a review that arrives in plan_required and ignores one from before the plan', async () => {
+    const stale = await setup()
+    await createRun(stale)
+    stale.supervisor.session.append('plan/review', { version: 1, correlation: 'old-exit', decision: 'approved' })
+    await stale.service.planReviewSettled()
+    const spec = await stale.service.startSpecPlan(stale.supervisor, 'brainstorm-1', SIGNAL)
+    await stale.service.recordResult(stale.supervisor, {
+      correlationId: spec.correlationId,
+      stage: 'codex-spec',
+      role: 'spec-only',
+      status: 'ok',
+      text: 'design spec',
+    })
+    const plan = await stale.service.startSpecPlan(stale.supervisor, 'brainstorm-1', SIGNAL)
+    await stale.service.recordResult(stale.supervisor, {
+      correlationId: plan.correlationId,
+      stage: 'codex-plan',
+      role: 'plan-only',
+      status: 'ok',
+      text: 'implementation plan',
+    })
+    await stale.fiber.dispose()
+    await stale.ctx.plugin(OrcService, CONFIG)
+    const resumed = stale.ctx.orc
+    await resumed.planReviewSettled()
+    expect(resumed.state(stale.supervisor).phase).toBe('plan_required')
+    expect(resumed.state(stale.supervisor).approval).toBeUndefined()
+    await resumed.advance(stale.supervisor, 'awaiting_user_approval')
+    expect(resumed.state(stale.supervisor).approval).toBeUndefined()
+
+    const harness = await setup()
+    await planReady(harness)
+    const session = harness.supervisor.session
+    session.append('plan/review', { version: 1, correlation: 'exit-inline', decision: 'rejected' })
+    await expect(harness.service.assignTask(harness.supervisor, {
+      taskId: TASK,
+      writeScope: ['src'],
+      acceptanceCriteria: 'done task-a',
+    })).rejects.toThrow(/user rejection blocks implementation/)
+    expect(harness.service.state(harness.supervisor).phase).toBe('awaiting_user_approval')
+    expect(harness.service.state(harness.supervisor).approval).toBe('rejected')
+    session.append('plan/review', { version: 1, correlation: 'exit-after-reject', decision: 'approved' })
+    await harness.service.planReviewSettled()
+    const state = harness.service.state(harness.supervisor)
+    expect(state.approval).toBe('approved')
+    expect(state.approvalCorrelation).toBe('exit-after-reject')
+    const logged = session.snapshotEvents().map(event => ({
+      type: event.type as string,
+      seq: event.seq,
+      data: event.data as { status?: string; correlation?: string; decision?: string; reviewSeq?: number; source?: string },
+    }))
+    const planSeq = logged.find(event => event.type === 'orc/plan/result' && event.data.status === 'ok')?.seq
+    const review = logged.find(event => event.type === 'plan/review' && event.data.correlation === 'exit-after-reject')
+    const approval = logged.find(event => event.type === 'orc/plan/approval' && event.data.decision === 'approved')
+    expect(review?.seq).toBeGreaterThan(planSeq ?? -1)
+    expect(approval?.data).toMatchObject({
+      source: 'plan/review',
+      correlation: 'exit-after-reject',
+      reviewSeq: review?.seq,
+    })
+    await harness.service.assignTask(harness.supervisor, {
+      taskId: TASK,
+      writeScope: ['src'],
+      acceptanceCriteria: 'done task-a',
+    })
+    await harness.service.advance(harness.supervisor, 'task_implementation')
+    await expect(harness.service.spawn(harness.supervisor, leadInput())).resolves.toMatchObject({ spawned: true })
+  })
+
+  it('rejects planReviewSettled when the approval append fails and still accepts a later review', async () => {
+    const harness = await setup()
+    await planReady(harness)
+    const session = harness.supervisor.session
+    const original = session.append.bind(session) as (type: string, data: unknown) => unknown
+    let refuseApproval = true
+    session.append = ((type: string, data: unknown) => {
+      if (refuseApproval && type === 'orc/plan/approval') throw new Error('approval append refused')
+      return original(type, data)
+    }) as typeof session.append
+    original('plan/review', { version: 1, correlation: 'exit-blocked', decision: 'approved' })
+    await expect(harness.service.planReviewSettled()).rejects.toThrow(/approval append refused/)
+    expect(harness.service.state(harness.supervisor).approval).toBeUndefined()
+    refuseApproval = false
+    original('plan/review', { version: 1, correlation: 'exit-after-failure', decision: 'approved' })
+    await harness.service.planReviewSettled()
+    expect(harness.service.state(harness.supervisor).approval).toBe('approved')
+    expect(harness.service.state(harness.supervisor).approvalCorrelation).toBe('exit-after-failure')
   })
 })
 
