@@ -128,7 +128,10 @@ export async function runCodexTaskLoop(
 
 /**
  * Run branch review and branch audit only after every task is clean.
- * A blocking finding reopens that task, records `orc/fix/iteration`, and repeats review and audit. Completion is not recorded here.
+ * A blocking finding reopens that task, records `orc/fix/iteration`, and repeats review and audit.
+ * Every blocking task from that pair is repaired before the next branch visit opens.
+ * A non-ok post-fix gate does not drop the remaining task ids.
+ * Completion is not recorded here.
  * @param service - ORC service.
  * @param caller - Supervisor.
  * @param signal - cancellation for each Codex start.
@@ -147,6 +150,14 @@ export async function runCodexFinalLoop(
   }
   for (;;) {
     if (service.state(caller).phase !== 'final_review') return service.state(caller)
+    const taskId = tasksAwaitingBranchFix(caller, service.state(caller))[0]
+    if (taskId !== undefined) {
+      const repaired = await repairTask(service, caller, fix, taskId, blockingBranchReports(service.state(caller)))
+      if (repaired !== undefined) return repaired
+      const gated = await enforceTaskGates(service, caller, signal, fix)
+      if (gated.phase !== 'final_review') return gated
+      continue
+    }
     const reviewed = await ensureReport(service, caller, signal, 'codex-review', { scope: 'branch' })
     if (reviewed.report?.status !== 'ok') return reviewed.state
     const audited = await ensureReport(service, caller, signal, 'codex-audit', { scope: 'branch' })
@@ -154,14 +165,7 @@ export async function runCodexFinalLoop(
     const review = reviewed.report
     const audit = audited.report
     if (!review.blocksProgress && !audit.blocksProgress) return audited.state
-    const taskIds = distinctBlockingTaskIds(audited.state, [review, audit])
-    if (taskIds.length === 0) return audited.state
-    for (const taskId of taskIds) {
-      const repaired = await repairTask(service, caller, fix, taskId, [review, audit])
-      if (repaired !== undefined) return repaired
-      const gated = await enforceTaskGates(service, caller, signal, fix)
-      if (gated.phase !== 'final_review') return gated
-    }
+    if (tasksAwaitingBranchFix(caller, audited.state).length === 0) return audited.state
   }
 }
 
@@ -312,13 +316,86 @@ function reportOf(
   return found
 }
 
-/** Task ids of blocking findings on this pair, in report order, once each. */
-function distinctBlockingTaskIds(state: OrcState, reports: readonly OrcDelegation[]): OrcTaskId[] {
-  const ids: OrcTaskId[] = []
-  for (const finding of blockingFindings(state, reports)) {
-    if (finding.taskId !== undefined && !ids.includes(finding.taskId)) ids.push(finding.taskId)
+interface BranchSide {
+  readonly ok: boolean
+  readonly tasks: readonly OrcTaskId[]
+}
+
+/**
+ * Blocking task ids from branch pairs whose review and audit are both ok, until a later `orc/fix/iteration`.
+ * A non-ok gate does not erase the ids that were not repaired yet.
+ */
+function tasksAwaitingBranchFix(caller: Agent, state: OrcState): OrcTaskId[] {
+  const pending: OrcTaskId[] = []
+  const visits = new Map<number, { review?: BranchSide; audit?: BranchSide; committed: boolean }>()
+  for (const event of loggedEvents(caller)) {
+    if (event.type === 'orc/fix/iteration') {
+      const taskId = loggedTaskId(event.data)
+      const index = taskId === undefined ? -1 : pending.findIndex(id => id === taskId)
+      if (index !== -1) pending.splice(index, 1)
+      continue
+    }
+    if (event.type !== 'orc/review/result' && event.type !== 'orc/audit/result') continue
+    const logged = loggedBranchResult(event.data, state)
+    if (logged === undefined) continue
+    const pair = visits.get(logged.visit) ?? { committed: false }
+    const side: BranchSide = { ok: logged.ok, tasks: logged.tasks }
+    if (event.type === 'orc/review/result') pair.review = side
+    else pair.audit = side
+    visits.set(logged.visit, pair)
+    if (!pair.committed && pair.review?.ok === true && pair.audit?.ok === true) {
+      for (const taskId of [...pair.review.tasks, ...pair.audit.tasks]) {
+        if (!pending.includes(taskId)) pending.push(taskId)
+      }
+      pair.committed = true
+    }
   }
-  return ids
+  return pending
+}
+
+/**
+ * Rows on the live Supervisor log.
+ * `orc/*` is not part of `SessionEventMap`, so the typed snapshot hides those rows. The values are still present.
+ */
+function loggedEvents(caller: Agent): readonly { readonly type: string; readonly data: unknown }[] {
+  const events: { type: string; data: unknown }[] = []
+  for (const event of caller.session.snapshotEvents()) {
+    events.push({ type: event.type, data: event.data })
+  }
+  return events
+}
+
+/** Ok blocking branch reports. Repair filters them down to one task. */
+function blockingBranchReports(state: OrcState): OrcDelegation[] {
+  return state.delegations.filter(item => item.scope === 'branch' && item.status === 'ok' && item.blocksProgress)
+}
+
+/** Branch result fields, or undefined when the row is not a branch delegation. */
+function loggedBranchResult(data: unknown, state: OrcState): { visit: number; ok: boolean; tasks: OrcTaskId[] } | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const record = data as Record<string, unknown>
+  if (typeof record.status !== 'string' || typeof record.correlationId !== 'string') return undefined
+  const delegation = state.delegations.find(item => item.correlationId === record.correlationId)
+  if (delegation === undefined || delegation.scope !== 'branch') return undefined
+  const tasks: OrcTaskId[] = []
+  if (record.status === 'ok' && Array.isArray(record.findings)) {
+    for (const finding of record.findings) {
+      if (typeof finding !== 'object' || finding === null) continue
+      const item = finding as Record<string, unknown>
+      if (typeof item.taskId !== 'string' || typeof item.severity !== 'string') continue
+      if (!state.blockingSeverities.some(severity => severity === item.severity)) continue
+      const taskId = brandTaskId(item.taskId)
+      if (!tasks.includes(taskId)) tasks.push(taskId)
+    }
+  }
+  return { visit: delegation.iteration, ok: record.status === 'ok', tasks }
+}
+
+/** Task id on an `orc/fix/iteration` payload. */
+function loggedTaskId(data: unknown): OrcTaskId | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const taskId = (data as { taskId?: unknown }).taskId
+  return typeof taskId === 'string' ? brandTaskId(taskId) : undefined
 }
 
 /** Findings on these reports whose severity is in the run's blocking set. */

@@ -831,6 +831,56 @@ describe('Codex dispatch', () => {
     expect(eventTypes(harness)).not.toContain('orc/run/completed')
   })
 
+  it('repairs the second blocking task after the first post-fix gate is non-ok', async () => {
+    const harness = await setup()
+    await approveWorkflow(harness)
+    await harness.service.assignTask(harness.supervisor, { taskId: TASK_A, writeScope: ['src'], acceptanceCriteria: 'done' })
+    await harness.service.assignTask(harness.supervisor, { taskId: TASK_B, writeScope: ['docs'], acceptanceCriteria: 'done too' })
+    await harness.service.advance(harness.supervisor, 'task_implementation')
+    await settleTask(harness, TASK_A)
+    const tasks: string[] = []
+    const fix: OrcFixWork = async (input) => {
+      tasks.push(String(input.taskId))
+      return { decision: `fix ${input.taskId}` }
+    }
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    expect((await runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, fix)).phase).toBe('next_task')
+    await harness.service.advance(harness.supervisor, 'task_implementation')
+    await settleTask(harness, TASK_B)
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    expect((await runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, fix)).phase).toBe('final_review')
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [
+      finding('codex-review', { id: 'finding-a', severity: 'critical', taskId: 'task-a' }),
+    ])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [
+      finding('codex-audit', { id: 'finding-b', severity: 'high', taskId: 'task-b', summary: 'audit block', file: 'src/b.ts', location: 'src/b.ts:3' }),
+    ])))
+    harness.fake.queue.push(Promise.resolve(textResult('not json')))
+    const blocked = await runCodexFinalLoop(harness.service, harness.supervisor, SIGNAL, fix)
+    expect(blocked.phase).toBe('task_review')
+    expect(tasks).toEqual(['task-a'])
+    expect(branchMarks(harness)).toEqual(['review:0', 'audit:0', 'fix:task-a'])
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    const resumed = await runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, fix)
+    expect(resumed.phase).toBe('final_review')
+    expect(resumed.branchVisit).toBe(1)
+    expect(tasks).toEqual(['task-a'])
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    const state = await runCodexFinalLoop(harness.service, harness.supervisor, SIGNAL, fix)
+    expect(tasks).toEqual(['task-a', 'task-b'])
+    expect(branchMarks(harness)).toEqual(['review:0', 'audit:0', 'fix:task-a', 'fix:task-b', 'review:2', 'audit:2'])
+    expect(state.phase).toBe('final_review')
+    expect(state.branchVisit).toBe(2)
+    expect(state.delegations.filter(item => item.scope === 'branch' && item.iteration === 2).every(item => item.status === 'ok' && item.blocksProgress === false)).toBe(true)
+    expect(eventTypes(harness)).not.toContain('orc/run/completed')
+  })
+
   it('uses the latest branch row when a malformed review is retried', async () => {
     const harness = await setup()
     await approveWorkflow(harness)
