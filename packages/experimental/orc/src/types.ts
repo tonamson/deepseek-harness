@@ -301,11 +301,15 @@ export interface OrcReviewRequested extends OrcCodexEnvelope {
   readonly taskId?: OrcTaskId
 }
 
-/** One finding carried by a review or audit result before it is stored. */
+/**
+ * One finding carried by a review or audit result before it is stored.
+ * A blocking branch finding names the task it reopens.
+ */
 export interface OrcFindingInput {
   readonly id: OrcFindingId
   readonly severity: OrcSeverity
   readonly summary: string
+  readonly taskId?: OrcTaskId
 }
 
 /** Version-1 review or audit result. */
@@ -334,11 +338,15 @@ export interface OrcFixIteration {
   readonly assigneeNodeId?: OrcNodeId
 }
 
-/** Version-1 guarded phase transition. */
+/**
+ * Version-1 guarded phase transition.
+ * `actorNodeId` is the Supervisor or Lead advancing the workflow. A Peer cannot.
+ */
 export interface OrcPhaseTransition {
   readonly version: 1
   readonly runId: OrcRunId
   readonly to: OrcWorkflowPhase
+  readonly actorNodeId: OrcNodeId
   readonly taskId?: OrcTaskId
 }
 

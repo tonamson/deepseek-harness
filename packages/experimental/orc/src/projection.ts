@@ -149,6 +149,7 @@ const findingInputSchema = z.object({
   id: findingIdSchema,
   severity: severitySchema,
   summary: z.string().min(1),
+  taskId: taskIdSchema.optional(),
 }).strict()
 
 const workflowCreatedSchema = z.object({
@@ -295,6 +296,7 @@ const phaseSchema = z.object({
   version: z.literal(1),
   runId: runIdSchema,
   to: workflowPhaseSchema,
+  actorNodeId: nodeIdSchema,
   taskId: taskIdSchema.optional(),
 }).strict()
 
@@ -374,6 +376,9 @@ function parseOrcEvent(event: unknown): OrcEvent | string {
   const version = declaredVersion(event)
   if (version !== undefined && version !== 1) return `unsupported ORC event version ${String(version)}`
   if (isRecord(event) && typeof event.type === 'string' && !isOrcEventType(event.type)) return 'not an orc event'
+  if (isRecord(event) && event.type === 'orc/phase' && isRecord(event.data) && event.data.actorNodeId === undefined) {
+    return 'phase actor is required'
+  }
   const parsed = orcEventSchema.safeParse(event)
   if (!parsed.success) return `malformed ORC payload: ${parsed.error.issues.map(issue => issue.message).join('; ')}`
   return parsed.data
@@ -782,6 +787,13 @@ function recordReport(
       return refuse(state, 'duplicate finding id')
     }
     seen.add(finding.id)
+    if (finding.taskId !== undefined && delegation.scope === 'task' && finding.taskId !== delegation.taskId) {
+      return refuse(state, 'finding task does not match the report')
+    }
+    if (delegation.scope === 'branch' && data.status === 'ok' && state.blockingSeverities.includes(finding.severity)) {
+      if (finding.taskId === undefined) return refuse(state, 'branch finding requires an owning task')
+      if (taskById(state, finding.taskId) === undefined) return refuse(state, 'branch finding task is not assigned')
+    }
   }
   const scope: OrcReviewScope = delegation.scope
   const blocksProgress = data.status !== 'ok'
@@ -790,16 +802,19 @@ function recordReport(
     ...state,
     findings: [
       ...state.findings,
-      ...data.findings.map(finding => ({
-        id: finding.id,
-        severity: finding.severity,
-        status: 'open' as const,
-        summary: finding.summary,
-        correlationId: delegation.correlationId,
-        scope,
-        iteration: delegation.iteration,
-        ...(delegation.taskId === undefined ? {} : { taskId: delegation.taskId }),
-      })),
+      ...data.findings.map((finding) => {
+        const taskId = finding.taskId ?? delegation.taskId
+        return {
+          id: finding.id,
+          severity: finding.severity,
+          status: 'open' as const,
+          summary: finding.summary,
+          correlationId: delegation.correlationId,
+          scope,
+          iteration: delegation.iteration,
+          ...(taskId === undefined ? {} : { taskId }),
+        }
+      }),
     ],
     delegations: state.delegations.map(item => item.correlationId === data.correlationId
       ? { ...item, status: data.status, blocksProgress, findingIds: data.findings.map(finding => finding.id) }
@@ -847,16 +862,21 @@ function recordFix(state: OrcState, event: Extract<OrcEvent, { type: 'orc/fix/it
   }))
 }
 
-/** Move the workflow when the edge and its required events are present. */
+/** Move the workflow when the actor, the edge, and its required events are present. */
 function changePhase(state: OrcState, event: Extract<OrcEvent, { type: 'orc/phase' }>): OrcState {
   const data = event.data
   const invalid = requireMutableRun(state, data.runId)
   if (invalid !== undefined) return invalid
+  const actorBlock = phaseActorBlock(state, data.actorNodeId)
+  if (actorBlock !== undefined) return refuse(state, actorBlock)
   const from = state.phase
   if (from === undefined) return refuse(state, 'supervisor root is required')
   if (!legalPhaseEdge(from, data.to)) return refuse(state, `illegal phase jump from ${from} to ${data.to}`)
-  const blocked = phaseBlock(state, from, data.to)
+  const blocked = phaseBlock(state, from, data.to, data.taskId)
   if (blocked !== undefined) return refuse(state, blocked)
+  if (from === 'final_review' && data.to === 'task_fix' && data.taskId !== undefined) {
+    return commitBranchReopen(state, data.taskId)
+  }
   return commitPhase(state, data.to)
 }
 
@@ -869,10 +889,7 @@ function failRun(state: OrcState, event: Extract<OrcEvent, { type: 'orc/run/fail
   return { ...state, phase: 'failed', terminalReason: event.data.reason }
 }
 
-/**
- * Terminal success after clean branch review and audit.
- * ponytail: a blocking branch finding refuses completion; reopening that task needs a task id on the branch result.
- */
+/** Terminal success after the latest branch review and audit are clean. */
 function completeRun(state: OrcState, event: Extract<OrcEvent, { type: 'orc/run/completed' }>): OrcState {
   const invalid = requireMutableRun(state, event.data.runId)
   if (invalid !== undefined) return invalid
@@ -939,6 +956,7 @@ function legalPhaseEdge(from: OrcWorkflowPhase, to: OrcWorkflowPhase): boolean {
     case 'next_task':
       return to === 'task_implementation'
     case 'final_review':
+      return to === 'task_fix'
     case 'complete':
     case 'failed':
       return false
@@ -948,7 +966,12 @@ function legalPhaseEdge(from: OrcWorkflowPhase, to: OrcWorkflowPhase): boolean {
 }
 
 /** Return the refusal for one legal edge, or undefined when the edge may commit. */
-function phaseBlock(state: OrcState, from: OrcWorkflowPhase, to: OrcWorkflowPhase): string | undefined {
+function phaseBlock(
+  state: OrcState,
+  from: OrcWorkflowPhase,
+  to: OrcWorkflowPhase,
+  taskId?: OrcTaskId,
+): string | undefined {
   switch (from) {
     case 'brainstorming':
       return state.delegations.some(item => item.kind === 'codex-spec') ? undefined : 'codex spec request is missing'
@@ -976,6 +999,7 @@ function phaseBlock(state: OrcState, from: OrcWorkflowPhase, to: OrcWorkflowPhas
     case 'next_task':
       return undefined
     case 'final_review':
+      return to === 'task_fix' ? branchReopenBlock(state, taskId) : `illegal phase jump from ${from} to ${to}`
     case 'complete':
     case 'failed':
       return `illegal phase jump from ${from} to ${to}`
@@ -1024,10 +1048,48 @@ function leaveFix(state: OrcState): string | undefined {
   const task = activeTask(state)
   if (task === undefined) return 'fix iteration is required before review'
   const audited = latestSettledIteration(state, 'codex-audit', task.id)
-  if (task.fixDecision === undefined || audited === undefined || task.iteration <= audited) {
-    return 'fix iteration is required before review'
-  }
+  if (task.iteration <= (audited ?? -1)) return 'fix iteration is required before review'
+  if (task.fixDecision !== undefined || hasBlockingBranchFinding(state, task.id)) return undefined
+  return 'fix iteration is required before review'
+}
+
+/** Refuse a phase whose actor is missing or a Peer. Supervisor and Lead may advance. */
+function phaseActorBlock(state: OrcState, actorNodeId: OrcNodeId): string | undefined {
+  const actor = nodeById(state, actorNodeId)
+  if (actor === undefined) return 'phase actor is missing'
+  if (actor.role === 'peer') return 'peer cannot advance the workflow'
   return undefined
+}
+
+/** Refuse reopening a task that has no blocking branch finding. */
+function branchReopenBlock(state: OrcState, taskId: OrcTaskId | undefined): string | undefined {
+  if (taskId === undefined) return 'branch reopen requires a task id'
+  if (taskById(state, taskId) === undefined) return 'task is not assigned'
+  if (!hasBlockingBranchFinding(state, taskId)) return 'blocking branch finding is required'
+  return undefined
+}
+
+/** Whether an ok branch report recorded a blocking finding for this task. */
+function hasBlockingBranchFinding(state: OrcState, taskId: OrcTaskId): boolean {
+  return state.findings.some((finding) => {
+    if (finding.scope !== 'branch' || finding.taskId !== taskId) return false
+    if (!state.blockingSeverities.includes(finding.severity)) return false
+    const delegation = delegationByCorrelation(state, finding.correlationId)
+    return delegation?.status === 'ok' && delegation.blocksProgress === true
+  })
+}
+
+/** Return one task to fix and increment its iteration. */
+function commitBranchReopen(state: OrcState, taskId: OrcTaskId): OrcState {
+  return {
+    ...mapTask(state, taskId, task => ({
+      ...task,
+      phase: 'fix',
+      iteration: task.iteration + 1,
+    })),
+    phase: 'task_fix',
+    activeTaskId: taskId,
+  }
 }
 
 /** Missing or non-ok report refusal for the active task's current iteration. */

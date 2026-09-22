@@ -96,7 +96,7 @@ function specResult(): OrcEvent {
 }
 
 function phase(to: OrcWorkflowPhase): OrcEvent {
-  return { type: 'orc/phase', data: { version: 1, runId: RUN, to } }
+  return { type: 'orc/phase', data: { version: 1, runId: RUN, to, actorNodeId: SUPERVISOR } }
 }
 
 function planRequested(): OrcEvent {
@@ -298,6 +298,27 @@ describe('ORC stream invariant', () => {
       appendOrc(current, phase('next_task'))
     }).toThrow(/blocking findings require fix/)
     expect(current.snapshotEvents()).toHaveLength(committed)
+  })
+
+  it('rejects a phase append with no actor or a peer actor before publication', () => {
+    const missing = session()
+    appendAll(missing, [workflow(), specRequested()])
+    const kept = missing.snapshotEvents().length
+    expect(() => {
+      appendRaw(missing, 'orc/phase', { version: 1, runId: RUN, to: 'spec_required' })
+    }).toThrow(/phase actor is required/)
+    expect(missing.snapshotEvents()).toHaveLength(kept)
+
+    const peer = session()
+    appendAll(peer, throughTaskReview().slice(0, -1))
+    const peerKept = peer.snapshotEvents().length
+    expect(() => {
+      appendOrc(peer, {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'task_review', actorNodeId: PEER_A },
+      })
+    }).toThrow(/peer cannot advance the workflow/)
+    expect(peer.snapshotEvents()).toHaveLength(peerKept)
   })
 
   it('ignores events outside the orc namespace', () => {

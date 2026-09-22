@@ -86,13 +86,14 @@ function specResult(status: OrcReportStatus = 'ok'): OrcEvent {
   }
 }
 
-function phase(to: OrcWorkflowPhase, taskId?: OrcTaskId): OrcEvent {
+function phase(to: OrcWorkflowPhase, taskId?: OrcTaskId, actorNodeId: OrcNodeId = SUPERVISOR): OrcEvent {
   return {
     type: 'orc/phase',
     data: {
       version: 1,
       runId: RUN,
       to,
+      actorNodeId,
       ...(taskId === undefined ? {} : { taskId }),
     },
   }
@@ -583,5 +584,128 @@ describe('ORC transition gates', () => {
       phase('final_review'),
       runCompleted(),
     ])).toMatch(/branch review result is missing/)
+  })
+
+  it('rejects a phase append with no actor', () => {
+    expect(failure([
+      workflow(),
+      specRequested(),
+      { type: 'orc/phase', data: { version: 1, runId: RUN, to: 'spec_required' } },
+    ])).toMatch(/phase actor is required/)
+  })
+
+  it('rejects a peer actor and accepts a lead actor', () => {
+    expect(failure([
+      ...eventsThroughPeer(),
+      {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'task_peer_settlement', actorNodeId: PEER_A },
+      },
+    ])).toMatch(/peer cannot advance the workflow/)
+    const advanced = replay([
+      ...eventsThroughPeer(),
+      {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'task_peer_settlement', actorNodeId: LEAD_A },
+      },
+    ])
+    expect(advanced.phase).toBe('task_peer_settlement')
+    expect(failure([
+      workflow(),
+      specRequested(),
+      {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'spec_required', actorNodeId: OrcNodeId('missing') },
+      },
+    ])).toMatch(/phase actor is missing/)
+  })
+
+  it('reopens the owning task from a blocking branch finding', () => {
+    const prefix: OrcEvent[] = [
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok'),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'ok'),
+      phase('final_review'),
+      reportRequested('review', 'corr-branch-review', 'branch', 0),
+      {
+        type: 'orc/review/result',
+        data: {
+          version: 1,
+          runId: RUN,
+          correlationId: OrcCorrelationId('corr-branch-review'),
+          status: 'ok',
+          findings: [{
+            id: OrcFindingId('finding-branch'),
+            severity: 'medium',
+            summary: 'branch block',
+            taskId: TASK_A,
+          }],
+        },
+      },
+      reportRequested('audit', 'corr-branch-audit', 'branch', 0),
+      reportResult('audit', 'corr-branch-audit', 'ok'),
+    ]
+    expect(failure([...prefix, runCompleted()])).toMatch(/blocking findings require fix/)
+    const reopened = replay([
+      ...prefix,
+      {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'task_fix', actorNodeId: SUPERVISOR, taskId: TASK_A },
+      },
+    ])
+    expect(reopened.phase).toBe('task_fix')
+    expect(reopened.activeTaskId).toBe(TASK_A)
+    expect(reopened.tasks.find(task => task.id === TASK_A)).toMatchObject({ phase: 'fix', iteration: 1 })
+    const resumed = replay([
+      ...prefix,
+      {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'task_fix', actorNodeId: SUPERVISOR, taskId: TASK_A },
+      },
+      phase('task_review'),
+    ])
+    expect(resumed.phase).toBe('task_review')
+    expect(resumed.tasks.find(task => task.id === TASK_A)?.iteration).toBe(1)
+  })
+
+  it('does not reopen a task for a low branch finding or a malformed branch result', () => {
+    const base = [
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'corr-review-a', 'task', 0, TASK_A),
+      reportResult('review', 'corr-review-a', 'ok'),
+      phase('task_audit'),
+      reportRequested('audit', 'corr-audit-a', 'task', 0, TASK_A),
+      reportResult('audit', 'corr-audit-a', 'ok'),
+      phase('final_review'),
+    ]
+    const low = replay([
+      ...base,
+      reportRequested('review', 'corr-branch-review', 'branch', 0),
+      reportResult('review', 'corr-branch-review', 'ok', [{ id: 'finding-low', severity: 'low', summary: 'nit' }]),
+      reportRequested('audit', 'corr-branch-audit', 'branch', 0),
+      reportResult('audit', 'corr-branch-audit', 'ok', [{ id: 'finding-info', severity: 'info', summary: 'note' }]),
+      runCompleted(),
+    ])
+    expect(low.phase).toBe('complete')
+    expect(failure([
+      ...base,
+      reportRequested('review', 'corr-branch-review', 'branch', 0),
+      reportResult('review', 'corr-branch-review', 'ok', [{ id: 'finding-low', severity: 'low', summary: 'nit' }]),
+      reportRequested('audit', 'corr-branch-audit', 'branch', 0),
+      reportResult('audit', 'corr-branch-audit', 'ok'),
+      {
+        type: 'orc/phase',
+        data: { version: 1, runId: RUN, to: 'task_fix', actorNodeId: SUPERVISOR, taskId: TASK_A },
+      },
+    ])).toMatch(/blocking branch finding is required/)
+    expect(failure([
+      ...base,
+      reportRequested('review', 'corr-branch-review', 'branch', 0),
+      reportResult('review', 'corr-branch-review', 'malformed'),
+      runCompleted(),
+    ])).toMatch(/branch review result is malformed and blocks progression/)
   })
 })
