@@ -1,6 +1,6 @@
 /** Cold reopen of a Loader-mounted ORC service through JSONL. */
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -42,11 +42,34 @@ const CONFIG: OrcServiceConfig = {
   planOutputSchema: 'plan-schema',
   reviewOutputSchema: 'review-schema',
   auditOutputSchema: 'audit-schema',
+  blockingSeverities: ['critical', 'high', 'medium'],
 }
 
 type Exact<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
 type OrcPayloads = { [Type in keyof OrcEventMap]: SessionEventMap[Type] }
 const orcPayloadsMatchSessionMap: Exact<OrcEventMap, OrcPayloads> = true
+
+it('replays the authored ORC corpus through durable completion before its final tool result', async () => {
+  const text = await readFile(new URL('../../../../snapshots/session/orc-superpowers/session.v3.jsonl', import.meta.url), 'utf8')
+  const rows = text.trim().split('\n').map(line => JSON.parse(line) as SessionEvent)
+  const orcEvents = rows.filter(row => row.type.startsWith('orc/')) as unknown as OrcEvent[]
+  expect(projectOrc(orcEvents)).toMatchObject({ phase: 'complete' })
+  const completed = rows.findIndex(row => row.type === 'orc/run/completed')
+  expect(rows[completed]).toEqual({
+    type: 'orc/run/completed',
+    data: { version: 1, runId: '{{workflow:1}}', actorNodeId: '{{session:1}}' },
+  })
+  expect(rows[completed - 1]?.type).toBe('orc/audit/result')
+  const next = rows[completed + 1]
+  expect(next?.type).toBe('tool/result')
+  if (next?.type !== 'tool/result') throw new Error('completion must precede the final tool result')
+  const result = next.data.message.content[0]
+  expect(result).toMatchObject({ type: 'tool-result', toolCallId: 'call-final-gates', isError: false })
+  if (result?.type !== 'tool-result') throw new Error('final tool result is missing')
+  const content = result.content[0]
+  if (content?.type !== 'text') throw new Error('final tool result has no state text')
+  expect(JSON.parse(content.text)).toEqual({ phase: 'complete', runId: '{{workflow:1}}', approval: 'approved' })
+})
 
 class FakeAgents extends Service {
   constructor(ctx: Context) {
@@ -131,7 +154,6 @@ describe('ORC loader composition', () => {
       writeScope: ['repo'],
       acceptanceCriteria: 'run reaches review',
       reportingFormat: 'durable events',
-      blockingSeverities: ['critical', 'high', 'medium'],
     })
     const spec = await service.startSpecPlan(supervisor, 'brainstorm-notes', SIGNAL)
     await service.recordResult(supervisor, {

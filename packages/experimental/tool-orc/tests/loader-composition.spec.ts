@@ -215,7 +215,6 @@ async function openWorkflow(harness: Harness): Promise<void> {
     writeScope: ['repo'],
     acceptanceCriteria: 'run reaches complete',
     reportingFormat: 'durable events',
-    blockingSeverities: ['critical', 'high', 'medium'],
   })
 }
 
@@ -308,7 +307,8 @@ describe('ORC profile composition', () => {
     })
     const coding = readFileSync(MY_CODING, 'utf8')
     const standard = readFileSync(STANDARD, 'utf8')
-    expect(coding).toContain('orc_request_spec_plan')
+    expect(coding).not.toContain('orc_request_spec_plan')
+    expect(coding).toContain('subagent_codex_spec')
     expect(coding).not.toContain('@deepseek-ai/dsh-experimental-orc')
     expect(standard).not.toContain('orc_request_spec_plan')
     expect(standard).not.toContain('@deepseek-ai/dsh-experimental-orc')
@@ -378,7 +378,6 @@ describe('ORC profile composition', () => {
       writeScope: ['repo'],
       acceptanceCriteria: 'done',
       reportingFormat: 'events',
-      blockingSeverities: ['critical', 'high', 'medium'],
     })
     const fake = ctx.get('subagents') as unknown as FakeSubagents
     fake.queue.push(Promise.resolve(codexText('codex-spec', { stage: 'codex-spec', spec: 'design is complete' })))
@@ -450,6 +449,40 @@ describe('ORC profile composition', () => {
 })
 
 describe('ORC plan approval and fix loop', () => {
+  it('allows a real exit_plan_mode review again after an early approval and delayed Codex plan', async () => {
+    const harness = await boot(profileConfig())
+    await openWorkflow(harness)
+    harness.fake.queue.push(Promise.resolve(codexText('codex-spec', { stage: 'codex-spec', spec: 'design' })))
+    const spec = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
+    await harness.orc.awaitCodex(harness.supervisor, spec.correlationId)
+    let finish!: (result: SubagentResult) => void
+    harness.fake.queue.push(new Promise((resolve) => { finish = resolve }))
+    const plan = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
+    harness.ctx.planMode.set(harness.supervisor, true)
+    harness.supervisor.session.append('turn/start', { turn: 1 })
+    await answerReview(harness, ['Approve'], 'early-approval')
+    expect(harness.orc.state(harness.supervisor).approval).toBeUndefined()
+    expect(harness.ctx.planMode.get(harness.supervisor)).toEqual({ active: true, pending: true })
+    finish(codexText('codex-plan', { stage: 'codex-plan', plan: '# Actual Codex plan' }))
+    await harness.orc.awaitCodex(harness.supervisor, plan.correlationId)
+    expect(harness.orc.state(harness.supervisor).approval).toBeUndefined()
+    const stop = harness.ctx.on('user-questions/request', () => Promise.resolve({
+      answers: [{ id: 'plan-review', selected: ['Approve'] }],
+    }))
+    const result = await harness.ctx.tools.execute({
+      callId: ToolCallId('real-approval'),
+      name: EXIT_PLAN_MODE,
+      arguments: { plan: '# Actual Codex plan' },
+      signal: SIGNAL,
+      agent: harness.supervisor,
+    })
+    stop()
+    expect(result.isError).toBe(false)
+    await harness.orc.planReviewSettled()
+    expect(harness.orc.state(harness.supervisor).approvalCorrelation).toBe('real-approval')
+    expect(harness.ctx.planMode.get(harness.supervisor)).toEqual({ active: true, pending: false })
+  })
+
   it('does not start a Lead before exit_plan_mode approval', async () => {
     const harness = await boot(profileConfig())
     await openWorkflow(harness)
@@ -673,6 +706,16 @@ describe('ORC plan approval and fix loop', () => {
     expect(harness.fake.sent.length).toBeGreaterThan(1)
     expect(harness.fake.sent.at(-1)?.text).toContain('branch drift')
     expect(finalState.phase).toBe('final_review')
+    const finished = await harness.ctx.tools.execute({
+      callId: ToolCallId('call-complete'),
+      name: 'orc_run_final_gates',
+      arguments: {},
+      signal: SIGNAL,
+      agent: harness.supervisor,
+    })
+    expect(finished.isError).toBe(false)
+    expect(harness.orc.state(harness.supervisor).phase).toBe('complete')
+    expect(harness.supervisor.session.snapshotEvents().some(event => event.type === 'orc/run/completed')).toBe(true)
     expect(finalState.tasks.every(task => task.phase === 'clean')).toBe(true)
     const branchPhases = plainEvents(harness.supervisor.session).flatMap(event =>
       event.type === 'orc/phase' && event.data.to !== undefined ? [event.data.to] : [])

@@ -53,6 +53,10 @@
         planOutputSchema: codex-plan
         reviewOutputSchema: codex-review
         auditOutputSchema: codex-audit
+        blockingSeverities:
+          - critical
+          - high
+          - medium
     - id: tool-orc
       name: '@deepseek-ai/dsh-experimental-tool-orc'
     - id: orc-snapshot-fixture

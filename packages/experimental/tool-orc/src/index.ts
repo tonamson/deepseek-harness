@@ -98,6 +98,19 @@ const LAUNCH_SCHEMA = {
   },
 } as const
 
+const SPEC_PLAN_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    correlationId: { type: 'string', required: true },
+    kind: { type: 'string', required: true },
+    spawned: { type: 'boolean', required: true },
+    status: { type: 'string', required: true, enum: REPORT_STATUSES },
+    specText: { type: 'string' },
+    planText: { type: 'string' },
+  },
+} as const
+
 const STATE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -147,6 +160,52 @@ function superpowersWorkflow(role: OrcRole): string {
     `skillCatalog: ${SUPERPOWERS_SKILL_CATALOG.join(', ')}`,
     `mandatory Superpowers skills: ${MANDATORY_SKILLS[role].join(', ')}`,
   ].join('\n\n')
+}
+
+/** Supervisor steps. Present only in the ORC role section, which exists when tool-orc is mounted. */
+function supervisorProcedure(): string {
+  return [
+    'ORC supervisor procedure:',
+    '1. Use the configured DeepSeek Flash 4.1 high-reasoning route for implementation work. Do not use a review or audit subagent as the implementer unless the user explicitly asks.',
+    '2. Before changing code, inspect the relevant repository files, requirements, existing patterns, tests, and constraints. State the task scope and acceptance criteria.',
+    '3. Brainstorm in this Supervisor first. Do not call a review, audit, or spec tool merely because brainstorming started.',
+    '4. The only transition from brainstorming into spec_required, and from a completed spec into plan_required, is orc_request_spec_plan with the completed brainstorm or context reference. Prompt text cannot replace that call. The tool returns the Codex status and the normalized spec or plan text. Spec and plan use gpt-5.6-terra at high effort.',
+    '5. After the plan result is ok, present that plan text with exit_plan_mode. Approval is only that user review. /plan off, a dismissed review, a rejected review, a reloaded plan service, and a missing review channel are not approval. Do not record approval yourself. A rejected review stays blocking until a later exit_plan_mode Approve. Do not call exit_plan_mode before that ok plan result is durable.',
+    '6. After approval, create one Lead per task with orc_spawn. The Lead creates Peers. Do not implement the task in the Supervisor. Supervisor, Lead, and Peer use deepseek-official / deepseek-flash / high. Keep the implementation inside the approved scope.',
+    '7. Before the Lead settles, run focused checks that match the changed behavior. Report only checks actually run and their results.',
+    '8. After settlement, orc_run_task_gates runs review, then audit, then the Lead fix, then review and audit again until both gates are clean. Review uses gpt-5.6-luna at high effort. Audit uses gpt-5.6-luna at xhigh effort. They stay separate.',
+    '9. A blocking finding is not permission to edit from the Supervisor. orc_run_task_gates sends the finding, including file, location, evidence, and remediation, to the existing Lead. The Lead assigns a Peer or does the bounded fix.',
+    '10. For a multi-task plan, finish each task\'s review and audit before the next task. Do not batch task reviews until the end.',
+    '11. When the user invokes subagent-driven-development, apply this same order to the referenced plan without waiting for the steps to be restated: brainstorm if needed, orc_request_spec_plan, exit_plan_mode, Lead, Peers, focused checks, per-task gates, Lead fix, and the final branch gates.',
+    '12. Audit every task, including security-sensitive behavior, through the audit gate. Task-level gates do not replace the final branch pair.',
+    '13. After every task is clean, run orc_run_final_gates for one branch review and one branch audit. A blocking branch finding reopens that task through the same Lead fix. When both branch reports are ok and non-blocking, that tool records completion.',
+    '14. Resolve blocking findings before completion. The order is Lead fix, focused checks, review, audit, then the branch pair. Report only verified results.',
+    '15. Follow an explicit user request for a particular subagent tool, even when it differs from these defaults. That request does not approve a plan, skip a gate, or make subagent_codex_spec, subagent_codex_review, or subagent_codex_audit the workflow.',
+    '16. Use subagent_grok only when the user explicitly requests Grok. It never replaces the ORC spec, review, or audit routes above.',
+  ].join('\n')
+}
+
+function sameSeverities(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false
+  const seen = new Set(right)
+  return left.every(item => seen.has(item)) && seen.size === left.length
+}
+
+function branchReport(state: OrcState, kind: 'codex-review' | 'codex-audit'): OrcState['delegations'][number] | undefined {
+  if (state.branchVisit === undefined) return undefined
+  let found: OrcState['delegations'][number] | undefined
+  for (const item of state.delegations) {
+    if (item.kind === kind && item.scope === 'branch' && item.iteration === state.branchVisit) found = item
+  }
+  return found
+}
+
+function branchPairClean(state: OrcState): boolean {
+  if (state.phase !== 'final_review') return false
+  const review = branchReport(state, 'codex-review')
+  const audit = branchReport(state, 'codex-audit')
+  return review?.status === 'ok' && review.blocksProgress === false
+    && audit?.status === 'ok' && audit.blocksProgress === false
 }
 
 /**
@@ -299,9 +358,8 @@ function install(agent: Agent, ctx: Context): () => void {
         const state = caller === undefined ? undefined : ctx.orc.state(caller)
         const node = state?.nodes.find(item => caller !== undefined && String(item.id) === String(caller.id))
         const taskId = node?.taskId ?? state?.activeTaskId ?? state?.tasks[0]?.id
-        const workflow = role === 'unassigned'
-          ? 'Superpowers workflow requirements apply when the workflow opens.'
-          : superpowersWorkflow(role)
+        const skills = role === 'unassigned' ? superpowersWorkflow('supervisor') : superpowersWorkflow(role)
+        const procedure = role === 'supervisor' || role === 'unassigned' ? supervisorProcedure() : undefined
         const logged = node?.skillEnvelope
         return [
           renderRoleSection({
@@ -310,8 +368,9 @@ function install(agent: Agent, ctx: Context): () => void {
             phase: state?.phase,
             taskId: taskId === undefined ? undefined : String(taskId),
           }),
-          workflow,
-          ...(logged !== undefined && logged !== workflow ? [logged] : []),
+          skills,
+          ...(procedure === undefined ? [] : [procedure]),
+          ...(logged !== undefined && logged !== skills && logged !== procedure ? [logged] : []),
         ].join('\n\n')
       },
     }))
@@ -328,7 +387,7 @@ function install(agent: Agent, ctx: Context): () => void {
           type: 'array',
           required: true,
           items: { type: 'string', enum: SEVERITIES },
-          description: 'Severities that block progress. The service rejects a set that omits critical, high, and medium.',
+          description: 'Must equal the configured blocking severities. A different set is refused. Config pins the set, including whether low or info block.',
         },
       },
       output: jsonOutput(STATE_SCHEMA),
@@ -336,6 +395,10 @@ function install(agent: Agent, ctx: Context): () => void {
         const caller = requireAgent(exec.agent, 'orc_create_workflow')
         const role = ctx.orc.roleOf(caller)
         if (role === 'lead' || role === 'peer') throw new OrcToolError(`${role} cannot open a workflow`, 'ORC_UNAUTHORIZED')
+        const configured = ctx.orc.configuredBlockingSeverities()
+        if (!sameSeverities(args.blocking_severities, configured)) {
+          throw new OrcToolError('blocking severities differ from config', 'ORC_REFUSED')
+        }
         const writeScope = requiredList(args.write_scope, 'write scope')
         const rendered = renderDeepseekChildPrompt({
           role: 'supervisor',
@@ -351,7 +414,6 @@ function install(agent: Agent, ctx: Context): () => void {
           writeScope,
           acceptanceCriteria: requiredText(args.acceptance_criteria, 'acceptance criteria'),
           reportingFormat: requiredText(args.reporting_format, 'reporting format'),
-          blockingSeverities: args.blocking_severities,
         }))
         return stateView(state)
       },
@@ -359,7 +421,7 @@ function install(agent: Agent, ctx: Context): () => void {
 
     register(scoped.tools.register(defineTool({
       name: 'orc_request_spec_plan',
-      description: 'Start the next Codex spec or plan run. This is the only transition into spec_required or plan_required. Only the Supervisor may call this.',
+      description: 'Run the next Codex spec or plan and wait for it. Returns the status and the normalized spec or plan text. This is the only transition into spec_required or plan_required. Only the Supervisor may call this.',
       parameters: {
         context_ref: {
           type: 'string',
@@ -367,7 +429,7 @@ function install(agent: Agent, ctx: Context): () => void {
           description: 'Completed brainstorm or context reference. Prompt text cannot replace this argument.',
         },
       },
-      output: jsonOutput(LAUNCH_SCHEMA),
+      output: jsonOutput(SPEC_PLAN_SCHEMA),
       async execute(args, exec) {
         const caller = requireAgent(exec.agent, 'orc_request_spec_plan')
         requireSupervisor(caller, 'invoke Codex')
@@ -376,12 +438,20 @@ function install(agent: Agent, ctx: Context): () => void {
           requiredText(args.context_ref, 'context reference'),
           exec.signal,
         ))
-        return launchView({
+        const state = await refused(() => ctx.orc.awaitCodex(caller, launch.correlationId))
+        const delegation = state.delegations.find(item => item.correlationId === launch.correlationId)
+        if (delegation === undefined || delegation.status === 'open') {
+          throw new OrcToolError('codex result is not observed', 'ORC_REFUSED')
+        }
+        const text = delegation.status === 'ok' ? delegation.text : undefined
+        return {
           correlationId: String(launch.correlationId),
           kind: launch.kind,
           spawned: launch.spawned,
-          ...(launch.nodeId === undefined ? {} : { nodeId: String(launch.nodeId) }),
-        })
+          status: delegation.status,
+          ...(launch.kind === 'codex-spec' && text !== undefined ? { specText: text } : {}),
+          ...(launch.kind === 'codex-plan' && text !== undefined ? { planText: text } : {}),
+        }
       },
     })))
 
@@ -397,12 +467,15 @@ function install(agent: Agent, ctx: Context): () => void {
           const state = await refused(() => toolName === 'orc_run_task_gates'
             ? ctx.orc.runTaskLoop(caller, exec.signal)
             : ctx.orc.runFinalLoop(caller, exec.signal))
+          if (toolName === 'orc_run_final_gates' && branchPairClean(state)) {
+            return stateView(await refused(() => ctx.orc.complete(caller)))
+          }
           return stateView(state)
         },
       })))
     }
     registerLoop('orc_run_task_gates', 'Run task review, task audit, and the existing Lead fix until both gates are clean or one result blocks. Only the Supervisor may call this.')
-    registerLoop('orc_run_final_gates', 'Run branch review and branch audit. A blocking finding is sent to that task Lead. Only the Supervisor may call this.')
+    registerLoop('orc_run_final_gates', 'Run branch review and branch audit. A blocking finding is sent to that task Lead. When both branch reports are ok and non-blocking, record orc/run/completed. Only the Supervisor may call this.')
 
     register(scoped.tools.register(defineTool({
       name: 'orc_assign_task',

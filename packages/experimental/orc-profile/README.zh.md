@@ -25,7 +25,7 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用本包
 
-把本包加到已初始化的 profile，然后选择其 persona 会调用 `orc_request_spec_plan` 与 `exit_plan_mode` 的编码 preset：
+把本包加到已初始化的 profile，然后选择编码 preset。只有挂上本包工具行时才存在的 ORC 角色段会调用 `orc_request_spec_plan` 与 `exit_plan_mode`：
 
 ```sh
 dsh plugin --profile headless add @deepseek-ai/dsh-experimental-orc-profile

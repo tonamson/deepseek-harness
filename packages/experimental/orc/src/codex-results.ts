@@ -33,7 +33,7 @@ export interface OrcCodexParseFailure {
   readonly rawText?: string
 }
 
-/** Parsed spec or plan text. `text` is the normalized document, `rawText` is the Codex answer. */
+/** Parsed spec or plan text. `text` has no surrounding whitespace; `rawText` retains the Codex envelope. */
 export interface OrcCodexTextSuccess {
   readonly status: 'ok'
   readonly stage: 'codex-spec' | 'codex-plan'
@@ -72,12 +72,12 @@ function findingSchema(stage: 'codex-review' | 'codex-audit') {
 
 const specSchema = z.object({
   stage: z.literal('codex-spec'),
-  spec: z.string().min(1),
+  spec: z.string().trim().min(1),
 }).strict()
 
 const planSchema = z.object({
   stage: z.literal('codex-plan'),
-  plan: z.string().min(1),
+  plan: z.string().trim().min(1),
 }).strict()
 
 const reviewSchema = z.object({

@@ -50,7 +50,7 @@ kind: "package-reference"
 - **创建并结算** — `orc_spawn`、`orc_start_task` 与 `orc_settle_task`。
 - **报告** — `orc_record_result` 只记录 DeepSeek 节点。Codex 的 spec、plan、review 与 audit 结果不是模型工具。`orc_record_fix` 记录修复决定。
 
-`orc_request_spec_plan` 接收 `context_ref`，并且是进入 `spec_required` 或 `plan_required` 的唯一调用。没有 ORC 工具接受批准决定。`orc_run_task_gates` 与 `orc_run_final_gates` 把阻断发现发给现有 Lead。review 与 audit 仍是两个工具。畸形或缺失的 Codex 结果仍是服务失败。
+`orc_request_spec_plan` 接收 `context_ref`，等待 Codex 答案，并返回状态以及规范化后的 spec 或 plan 文本。它是进入 `spec_required` 或 `plan_required` 的唯一调用。没有 ORC 工具接受批准决定。`orc_run_task_gates` 与 `orc_run_final_gates` 把阻断发现发给现有 Lead。review 与 audit 仍是两个工具。畸形或缺失的 Codex 结果仍是服务失败。
 
 ### 已记录的模型输入
 

@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Add the package to an initialized profile, then select the coding preset whose persona calls `orc_request_spec_plan` and `exit_plan_mode`:
+Add the package to an initialized profile, then select the coding preset. The ORC role section, present only when this package's tool row is mounted, calls `orc_request_spec_plan` and `exit_plan_mode`:
 
 ```sh
 dsh plugin --profile headless add @deepseek-ai/dsh-experimental-orc-profile

@@ -28,6 +28,8 @@ export interface OrcCodexSettlement {
   readonly role: string
   readonly taskId?: OrcTaskId
   readonly result: Promise<SubagentResult>
+  /** A previous settlement could not persist any result; retry as a blocking failure. */
+  readonly recordingFailed?: boolean
 }
 
 /** Findings and iteration handed to the DeepSeek fix step. */
@@ -69,7 +71,7 @@ export async function settleCodexRun(service: OrcService, caller: Agent, input: 
     return recordParsed(service, caller, input, { status: 'unavailable', ...rawField(message) })
   }
   const rawText = codexFinalText(settled.output)
-  if (settled.stopReason !== 'completed') {
+  if (input.recordingFailed || settled.stopReason !== 'completed') {
     // A non-completed stop can still carry text. That text is evidence, not a clean report.
     return recordParsed(service, caller, input, { status: 'failed', ...rawField(rawText) })
   }
@@ -186,27 +188,43 @@ interface ParsedRecord {
   readonly findings?: readonly OrcFindingInput[]
 }
 
-/** Record a parsed result. A duplicate finding id stays open and keeps the projection error. */
+/**
+ * Record a parsed result.
+ * A failed append still stores a blocking result so the row cannot stay open without a result promise.
+ */
 async function recordParsed(service: OrcService, caller: Agent, input: OrcCodexSettlement, recorded: ParsedRecord): Promise<OrcState> {
   try {
     return await writeResult(service, caller, input, recorded)
   } catch (error: unknown) {
-    const current = service.state(caller)
-    if (delegationStatus(current, input.correlationId) !== 'open') return current
-    if (recorded.status !== 'ok' || isDuplicateFindingRefusal(error)) throw error
-    try {
-      return await writeResult(service, caller, input, { status: 'malformed', ...rawField(recorded.rawText) })
-    } catch (fallback: unknown) {
-      const after = service.state(caller)
-      if (delegationStatus(after, input.correlationId) !== 'open') return after
-      throw fallback
-    }
+    // The first refusal is kept only as the cause of the blocking row. The loop must not see an open Codex row.
+    void error
+    return persistBlocking(service, caller, input, recorded)
   }
 }
 
-/** The fold rejected an id that is already on the run. That is not a malformed Codex document. */
-function isDuplicateFindingRefusal(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('duplicate finding id')
+/** Store malformed, then failed, when the parsed record did not close the row. */
+async function persistBlocking(
+  service: OrcService,
+  caller: Agent,
+  input: OrcCodexSettlement,
+  recorded: ParsedRecord,
+): Promise<OrcState> {
+  const current = service.state(caller)
+  if (delegationStatus(current, input.correlationId) !== 'open') return current
+  try {
+    return await writeResult(service, caller, input, { status: 'malformed', ...rawField(recorded.rawText) })
+  } catch (fallback: unknown) {
+    const after = service.state(caller)
+    if (delegationStatus(after, input.correlationId) !== 'open') return after
+    const evidence = fallback instanceof Error ? fallback.message : String(fallback)
+    try {
+      return await writeResult(service, caller, input, { status: 'failed', ...rawField(recorded.rawText ?? evidence) })
+    } catch (terminal: unknown) {
+      const last = service.state(caller)
+      if (delegationStatus(last, input.correlationId) !== 'open') return last
+      throw terminal
+    }
+  }
 }
 
 /** Append one Codex result through the service. */

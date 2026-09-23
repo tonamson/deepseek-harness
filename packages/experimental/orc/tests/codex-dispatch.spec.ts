@@ -48,6 +48,21 @@ function fenced(value: unknown, language = 'json'): string {
 }
 
 describe('Codex result parser', () => {
+  it.each([
+    ['codex-spec', 'spec', parseCodexSpec],
+    ['codex-plan', 'plan', parseCodexPlan],
+  ] as const)('normalizes %s document whitespace while retaining raw evidence', (stage, field, parse) => {
+    const rawText = JSON.stringify({ stage, [field]: ' \n# Document\n\n  Indented detail\n ' })
+    expect(parse(rawText)).toEqual({
+      status: 'ok',
+      stage,
+      rawText,
+      text: '# Document\n\n  Indented detail',
+    })
+    const blank = JSON.stringify({ stage, [field]: ' \n\t ' })
+    expect(parse(blank)).toMatchObject({ status: 'malformed', rawText: blank })
+  })
+
   it('accepts a clean spec and plan from JSON text or one JSON code block', () => {
     const spec = JSON.stringify({ stage: 'codex-spec', spec: 'design is complete' })
     expect(parseCodexSpec(spec)).toEqual({
@@ -205,6 +220,7 @@ const CONFIG: OrcServiceConfig = {
   planOutputSchema: 'plan-envelope',
   reviewOutputSchema: 'review-envelope',
   auditOutputSchema: 'audit-envelope',
+  blockingSeverities: [...BLOCKING],
 }
 
 class FakeAgents extends Service {
@@ -289,7 +305,7 @@ function asAgent(ctx: Context, id: string): Agent {
   return { id: session.id, session, options: {} } as Agent
 }
 
-async function setup(): Promise<Harness> {
+async function setup(blockingSeverities: readonly OrcSeverity[] = BLOCKING): Promise<Harness> {
   const ctx = new Context()
   open.push(ctx)
   await ctx.plugin(SessionStore)
@@ -299,7 +315,7 @@ async function setup(): Promise<Harness> {
   await ctx.plugin(FakeSubagents)
   await ctx.plugin(InvariantService, { enabled: true })
   await ctx.plugin(OrcInvariant)
-  await ctx.plugin(OrcService, CONFIG)
+  await ctx.plugin(OrcService, { ...CONFIG, blockingSeverities: [...blockingSeverities] })
   return { ctx, service: ctx.orc, supervisor: asAgent(ctx, 'supervisor'), fake: ctx.get('subagents') as unknown as FakeSubagents }
 }
 
@@ -345,19 +361,18 @@ function leadInput(taskId: ReturnType<typeof OrcTaskId>) {
   }
 }
 
-async function createRun(harness: Harness, blocking: readonly OrcSeverity[] = BLOCKING): Promise<void> {
+async function createRun(harness: Harness): Promise<void> {
   await harness.service.createWorkflow(harness.supervisor, {
     prompt: 'Supervisor prompt',
     skillEnvelope: 'superpowers',
     writeScope: ['repo'],
     acceptanceCriteria: 'run reaches complete',
     reportingFormat: 'durable events',
-    blockingSeverities: [...blocking],
   })
 }
 
-async function approveWorkflow(harness: Harness, blocking?: readonly OrcSeverity[]): Promise<void> {
-  await createRun(harness, blocking)
+async function approveWorkflow(harness: Harness): Promise<void> {
+  await createRun(harness)
   const spec = JSON.stringify({ stage: 'codex-spec', spec: 'design is complete' })
   harness.fake.queue.push(Promise.resolve(textResult(spec)))
   await runCodexSpecPlan(harness.service, harness.supervisor, 'brainstorm-1', SIGNAL)
@@ -671,8 +686,8 @@ describe('Codex dispatch', () => {
   })
 
   it('treats a low finding as blocking only when the run lists it', async () => {
-    const harness = await setup()
-    await approveWorkflow(harness, [...BLOCKING, 'low'])
+    const harness = await setup([...BLOCKING, 'low'])
+    await approveWorkflow(harness)
     await harness.service.assignTask(harness.supervisor, { taskId: TASK_A, writeScope: ['src'], acceptanceCriteria: 'done' })
     await harness.service.advance(harness.supervisor, 'task_implementation')
     await settleTask(harness, TASK_A)
@@ -967,7 +982,7 @@ describe('Codex dispatch', () => {
     expect(eventTypes(harness)).not.toContain('orc/run/completed')
   })
 
-  it('leaves a reused finding id open instead of recording a malformed gate', async () => {
+  it('reopens a reused finding id and keeps the review row closed', async () => {
     const harness = await setup()
     await approveWorkflow(harness)
     await harness.service.assignTask(harness.supervisor, { taskId: TASK_A, writeScope: ['src'], acceptanceCriteria: 'done' })
@@ -978,11 +993,86 @@ describe('Codex dispatch', () => {
     harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [reused])))
     harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
     harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [reused])))
-    await expect(runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, fix)).rejects.toThrow(/duplicate finding id/)
-    const reviews = harness.service.state(harness.supervisor).delegations.filter(item => item.kind === 'codex-review')
-    expect(reviews.map(item => item.status)).toEqual(['ok', 'open'])
-    expect(reviews[1]?.rawText).toBeUndefined()
-    expect(harness.service.state(harness.supervisor).phase).toBe('task_review')
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    const state = await runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, fix)
+    const reviews = state.delegations.filter(item => item.kind === 'codex-review')
+    expect(reviews.map(item => item.status)).toEqual(['ok', 'ok', 'ok'])
+    expect(reviews[1]?.rawText).toContain('finding-reused')
+    expect(state.findings.filter(item => String(item.id) === 'finding-reused')).toHaveLength(1)
+    expect(state.findings.find(item => String(item.id) === 'finding-reused')?.correlationId).toBe(reviews[1]?.correlationId)
+    expect(state.phase).toBe('final_review')
+    expect(reviews.some(item => item.status === 'open')).toBe(false)
+  })
+
+  it('persists a blocking result when the parsed record is refused', async () => {
+    const harness = await setup()
+    await approveWorkflow(harness)
+    await harness.service.assignTask(harness.supervisor, { taskId: TASK_A, writeScope: ['src'], acceptanceCriteria: 'done' })
+    await harness.service.advance(harness.supervisor, 'task_implementation')
+    await settleTask(harness, TASK_A)
+    const original = harness.service.recordResult.bind(harness.service)
+    let refused = false
+    harness.service.recordResult = (caller, input) => {
+      if (!refused && input.status === 'ok' && input.stage === 'codex-review') {
+        refused = true
+        throw new Error('duplicate finding id')
+      }
+      return original(caller, input)
+    }
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    const state = await runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, async () => ({ decision: 'unused' }))
+    const review = state.delegations.find(item => item.kind === 'codex-review')
+    expect(review?.status).toBe('malformed')
+    expect(review?.rawText).toContain('findings')
+    expect(state.delegations.some(item => item.status === 'open' && item.kind !== 'deepseek-node')).toBe(false)
+    expect(state.phase).toBe('task_review')
+  })
+
+  it('records completion only through the supervisor after a clean branch pair', async () => {
+    const harness = await setup()
+    await approveWorkflow(harness)
+    await harness.service.assignTask(harness.supervisor, { taskId: TASK_A, writeScope: ['src'], acceptanceCriteria: 'done' })
+    await harness.service.advance(harness.supervisor, 'task_implementation')
+    await settleTask(harness, TASK_A)
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    await runCodexTaskLoop(harness.service, harness.supervisor, SIGNAL, async () => ({ decision: 'unused' }))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))
+    harness.fake.queue.push(Promise.resolve(reportResult('codex-audit', [])))
+    const ready = await runCodexFinalLoop(harness.service, harness.supervisor, SIGNAL, async () => ({ decision: 'unused' }))
+    expect(ready.phase).toBe('final_review')
+    expect(eventTypes(harness)).not.toContain('orc/run/completed')
+    const stranger = { id: SessionId('intruder'), session: harness.supervisor.session, options: {} } as Agent
+    await expect(harness.service.complete(stranger)).rejects.toThrow(/only the supervisor/)
+    const done = await harness.service.complete(harness.supervisor)
+    expect(done.phase).toBe('complete')
+    expect(eventTypes(harness)).toContain('orc/run/completed')
+  })
+
+  it('retains Codex evidence for settlement after every result append fails', async () => {
+    const harness = await setup()
+    await createRun(harness)
+    let finish!: (result: SubagentResult) => void
+    harness.fake.queue.push(new Promise((resolve) => { finish = resolve }))
+    const launch = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
+    const session = harness.supervisor.session
+    const append = session.append.bind(session)
+    let unavailable = true
+    session.append = (...args) => {
+      if (args[0] === 'orc/spec/result' && unavailable) throw new Error('result storage unavailable')
+      return append(...args)
+    }
+    const raw = JSON.stringify({ stage: 'codex-spec', spec: 'preserve this design' })
+    finish(textResult(raw))
+    await expect(harness.service.awaitCodex(harness.supervisor, launch.correlationId)).rejects.toThrow(/result storage unavailable/)
+    expect(harness.service.state(harness.supervisor).delegations[0]?.status).toBe('open')
+    unavailable = false
+    const recovered = await harness.service.awaitCodex(harness.supervisor, launch.correlationId)
+    expect(recovered.delegations[0]).toMatchObject({ status: 'failed', rawText: raw, blocksProgress: true })
+    expect(recovered.specText).toBeUndefined()
+    expect(harness.fake.oneShot).toHaveLength(1)
   })
 
   it('puts each stage JSON contract in the envelope without a provider outputSchema', () => {

@@ -312,6 +312,40 @@ function throughTaskReview(blocking: readonly OrcSeverity[] = BLOCKING, secondTa
   ]
 }
 
+describe('ORC finding identity', () => {
+  it('reopens the same finding id on a later review and still refuses it twice in one report', () => {
+    const repeated = replay([
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'rev-1', 'task', 0, TASK_A),
+      reportResult('review', 'rev-1', 'ok', [{ id: 'finding-1', severity: 'high', summary: 'bounds' }]),
+      phase('task_audit'),
+      reportRequested('audit', 'aud-1', 'task', 0, TASK_A),
+      reportResult('audit', 'aud-1', 'ok', []),
+      phase('task_fix'),
+      fixIteration(TASK_A, 1),
+      phase('task_review'),
+      reportRequested('review', 'rev-2', 'task', 1, TASK_A),
+      reportResult('review', 'rev-2', 'ok', [{ id: 'finding-1', severity: 'high', summary: 'still bounds' }]),
+    ])
+    expect(repeated.findings).toHaveLength(1)
+    expect(repeated.findings[0]).toMatchObject({
+      summary: 'still bounds',
+      status: 'open',
+      correlationId: OrcCorrelationId('rev-2'),
+      iteration: 1,
+    })
+    expect(repeated.delegations.filter(item => item.kind === 'codex-review').map(item => item.status)).toEqual(['ok', 'ok'])
+    expect(failure([
+      ...throughTaskReview(BLOCKING, false),
+      reportRequested('review', 'rev-1', 'task', 0, TASK_A),
+      reportResult('review', 'rev-1', 'ok', [
+        { id: 'finding-1', severity: 'high', summary: 'bounds' },
+        { id: 'finding-1', severity: 'high', summary: 'again' },
+      ]),
+    ])).toMatch(/duplicate finding id/)
+  })
+})
+
 describe('ORC role edges', () => {
   it('projects the first supervisor root', () => {
     const state = replay([workflow()])

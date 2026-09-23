@@ -59,15 +59,18 @@ const CONFIG: OrcServiceConfig = {
   planOutputSchema: 'plan-schema',
   reviewOutputSchema: 'review-schema',
   auditOutputSchema: 'audit-schema',
+  blockingSeverities: [...BLOCKING],
 }
 
 class FakeAgents extends Service {
+  lookup: Agent | undefined
+
   constructor(ctx: Context) {
     super(ctx, 'agents')
   }
 
-  get(): undefined {
-    return undefined
+  get(id: SessionId): Agent | undefined {
+    return this.lookup?.id === id ? this.lookup : undefined
   }
 
   list(): Agent[] {
@@ -196,7 +199,6 @@ async function createRun(harness: Harness): Promise<void> {
     writeScope: ['repo'],
     acceptanceCriteria: 'run reaches complete',
     reportingFormat: 'durable events',
-    blockingSeverities: [...BLOCKING],
   })
 }
 
@@ -255,15 +257,15 @@ describe('ORC service role tree', () => {
   })
 
   it('refuses a hidden blocking threshold and records the configured route', async () => {
+    const ctx = new Context()
+    open.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(FakeAgents)
+    await ctx.plugin(FakePersistence)
+    await ctx.plugin(FakeSubagents)
+    await expect(ctx.plugin(OrcService, { ...CONFIG, blockingSeverities: ['low'] })).rejects.toThrow(/critical, high, and medium/)
     const harness = await setup()
-    await expect(harness.service.createWorkflow(harness.supervisor, {
-      prompt: 'Supervisor prompt',
-      skillEnvelope: 'superpowers',
-      writeScope: ['repo'],
-      acceptanceCriteria: 'run reaches complete',
-      reportingFormat: 'durable events',
-      blockingSeverities: ['low'],
-    })).rejects.toThrow(/critical, high, and medium/)
     expect(harness.service.state(harness.supervisor).runId).toBeUndefined()
 
     await createRun(harness)
@@ -369,6 +371,119 @@ describe('ORC service role tree', () => {
     expect(harness.fake.continuable).toHaveLength(2)
     await expect(harness.service.advance(peer, 'task_peer_settlement')).rejects.toThrow(/peer cannot advance/)
     await expect(harness.service.fail(lead, 'lead stop')).rejects.toThrow(/lead cannot fail the run/)
+  })
+})
+
+describe('ORC task caller', () => {
+  it('requires the supervisor or the owning lead before start, settlement, and fix', async () => {
+    const harness = await setup()
+    await implementing(harness)
+    const leadLaunch = await harness.service.spawn(harness.supervisor, leadInput())
+    const lead = agentFor(harness.ctx, leadLaunch)
+    await harness.service.startTask(harness.supervisor, { taskId: TASK, leadNodeId: leadLaunch.nodeId! })
+    const peerLaunch = await harness.service.spawn(lead, peerInput())
+    const peer = agentFor(harness.ctx, peerLaunch)
+    const intruder = { id: SessionId('intruder'), session: harness.supervisor.session, options: {} } as Agent
+    await expect(harness.service.startTask(intruder, { taskId: TASK, leadNodeId: leadLaunch.nodeId! })).rejects.toThrow(/owning lead/)
+    await expect(harness.service.settleTask(peer, {
+      taskId: TASK,
+      leadNodeId: leadLaunch.nodeId!,
+      evidence: 'peer evidence',
+    })).rejects.toThrow(/owning lead/)
+    await expect(harness.service.recordFix(intruder, {
+      taskId: TASK,
+      iteration: 1,
+      decision: 'fix bounds',
+    })).rejects.toThrow(/owning lead/)
+    await expect(harness.service.startTask(lead, { taskId: TASK, leadNodeId: leadLaunch.nodeId! })).rejects.toThrow(/task is not assigned/)
+    await expect(harness.service.recordFix(lead, { taskId: TASK, iteration: 1, decision: 'fix bounds' })).rejects.toThrow(/task fix/)
+    expect(peerLaunch.nodeId).toBeDefined()
+  })
+
+  it('denies alternate spawn, fork, Codex, and Grok tools on both child roles', async () => {
+    const harness = await setup()
+    await harness.ctx.plugin(class FakeTools extends Service {
+      constructor(ctx: Context) {
+        super(ctx, 'tools')
+      }
+
+      schemas(): { name: string }[] {
+        return [
+          'subagent',
+          'subagent_fork',
+          'subagent_codex_spec',
+          'subagent_codex_review',
+          'subagent_codex_audit',
+          'subagent_grok',
+        ].map(name => ({ name }))
+      }
+    })
+    await implementing(harness)
+    const leadLaunch = await harness.service.spawn(harness.supervisor, leadInput())
+    expect(harness.fake.continuable.at(-1)?.request.toolFilter).toEqual({
+      deny: ['subagent', 'subagent_fork', 'subagent_codex_spec', 'subagent_codex_review', 'subagent_codex_audit', 'subagent_grok'],
+    })
+    const lead = agentFor(harness.ctx, leadLaunch)
+    await harness.service.startTask(harness.supervisor, { taskId: TASK, leadNodeId: leadLaunch.nodeId! })
+    await harness.service.spawn(lead, peerInput())
+    expect(harness.fake.continuable.at(-1)?.request.toolFilter).toEqual({
+      deny: ['subagent', 'subagent_fork', 'subagent_codex_spec', 'subagent_codex_review', 'subagent_codex_audit', 'subagent_grok'],
+    })
+  })
+
+  it('keeps plan mode active when an approved review arrives before the ok plan result', async () => {
+    const harness = await setup()
+    await createRun(harness)
+    const spec = await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
+    await harness.service.recordResult(harness.supervisor, {
+      correlationId: spec.correlationId,
+      stage: 'codex-spec',
+      role: 'spec-only',
+      status: 'ok',
+      text: 'design spec',
+    })
+    await harness.service.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
+    const sets: boolean[] = []
+    let pending: boolean | undefined = false
+    let active = true
+    await harness.ctx.plugin(class FakePlanMode extends Service {
+      constructor(ctx: Context) {
+        super(ctx, 'planMode')
+      }
+
+      get(): { active: boolean; pending?: boolean } {
+        return { active, ...(pending === undefined ? {} : { pending }) }
+      }
+
+      set(_agent: Agent, next: boolean): 'cancelled' {
+        sets.push(next)
+        pending = next
+        active = next
+        return 'cancelled'
+      }
+    })
+    const agents = harness.ctx.get('agents') as FakeAgents
+    agents.lookup = harness.supervisor
+    harness.supervisor.session.append('plan/review', { version: 1, correlation: 'early-review', decision: 'approved' })
+    await harness.service.planReviewSettled()
+    expect(sets).toEqual([true])
+    expect(harness.service.state(harness.supervisor).approval).toBeUndefined()
+    const plan = harness.service.state(harness.supervisor).delegations.find(item => item.kind === 'codex-plan')
+    if (plan === undefined) throw new Error('plan did not start')
+    await harness.service.recordResult(harness.supervisor, {
+      correlationId: plan.correlationId,
+      stage: 'codex-plan',
+      role: 'plan-only',
+      status: 'ok',
+      text: 'implementation plan',
+    })
+    expect(harness.service.state(harness.supervisor).approval).toBeUndefined()
+    pending = false
+    active = true
+    harness.supervisor.session.append('plan/review', { version: 1, correlation: 'later-review', decision: 'approved' })
+    await harness.service.planReviewSettled()
+    expect(harness.service.state(harness.supervisor).approval).toBe('approved')
+    expect(sets).toEqual([true])
   })
 })
 
@@ -721,7 +836,6 @@ describe('ORC delegated results', () => {
       writeScope: ['repo'],
       acceptanceCriteria: 'run reaches complete',
       reportingFormat: 'durable events',
-      blockingSeverities: [...BLOCKING],
     })).rejects.toThrow(/ORC append failed: disk full/)
     expect(harness.service.state(harness.supervisor).runId).toBeUndefined()
     session.append = original

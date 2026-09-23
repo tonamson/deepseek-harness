@@ -5,8 +5,9 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import { ToolCallId, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { ContinuableStart, ContinuableStartSpec, SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
+import type { ContinuableStart, ContinuableStartSpec, SubagentResult, SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
   OrcService,
   OrcTaskId,
@@ -73,6 +74,7 @@ const CONFIG: OrcServiceConfig = {
   planOutputSchema: 'plan-schema',
   reviewOutputSchema: 'review-schema',
   auditOutputSchema: 'audit-schema',
+  blockingSeverities: [...BLOCKING],
 }
 
 class FakePersistence extends Service {
@@ -86,6 +88,7 @@ class FakePersistence extends Service {
 class FakeSubagents extends Service {
   readonly continuable: ContinuableStartSpec[] = []
   readonly oneShot: { name: string; request: SubagentStartRequest }[] = []
+  readonly queue: Promise<SubagentResult>[] = []
 
   constructor(ctx: Context) {
     super(ctx, 'subagents')
@@ -93,10 +96,11 @@ class FakeSubagents extends Service {
 
   async start(name: string, request: SubagentStartRequest): Promise<SubagentRun> {
     this.oneShot.push({ name, request })
+    const result = this.queue.shift() ?? new Promise<SubagentResult>(() => {})
     return {
       id: SessionId(`shot-${this.oneShot.length}`),
       localAgent: undefined,
-      result: new Promise(() => {}) as SubagentRun['result'],
+      result,
       dispose: () => Promise.resolve(),
     }
   }
@@ -206,20 +210,22 @@ async function openWorkflow(harness: Harness): Promise<void> {
     writeScope: ['repo'],
     acceptanceCriteria: 'run reaches complete',
     reportingFormat: 'durable events',
-    blockingSeverities: [...BLOCKING],
   })
 }
 
 async function finishFromOpenSpec(harness: Harness): Promise<void> {
   const task = OrcTaskId(TASK)
-  const spec = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
-  await harness.orc.recordResult(harness.supervisor, {
-    correlationId: spec.correlationId,
-    stage: 'codex-spec',
-    role: 'spec-only',
-    status: 'ok',
-    text: 'design spec',
-  })
+  const current = harness.orc.state(harness.supervisor)
+  if (!current.delegations.some(item => item.kind === 'codex-spec' && item.status === 'ok')) {
+    const spec = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
+    await harness.orc.recordResult(harness.supervisor, {
+      correlationId: spec.correlationId,
+      stage: 'codex-spec',
+      role: 'spec-only',
+      status: 'ok',
+      text: 'design spec',
+    })
+  }
   const plan = await harness.orc.startSpecPlan(harness.supervisor, 'brainstorm-1', SIGNAL)
   await harness.orc.recordResult(harness.supervisor, {
     correlationId: plan.correlationId,
@@ -272,12 +278,75 @@ function promptText(blocks: readonly ContentBlock[] | undefined): string {
 }
 
 describe('dsh-tool-orc', () => {
+  it.each(['codex-spec', 'codex-plan'] as const)('waits for delayed %s and returns its normalized text', async (stage) => {
+    const harness = await setup()
+    await openWorkflow(harness)
+    if (stage === 'codex-plan') {
+      harness.fake.queue.push(Promise.resolve({
+        output: [{ type: 'text', text: JSON.stringify({ stage: 'codex-spec', spec: 'design' }) }],
+        stopReason: 'completed',
+      }))
+      await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', { context_ref: 'brainstorm' })
+    }
+    let finish!: (result: SubagentResult) => void
+    harness.fake.queue.push(new Promise((resolve) => { finish = resolve }))
+    const pending = execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', { context_ref: 'brainstorm' })
+    const returned = await Promise.race([
+      pending.then(() => true),
+      new Promise<boolean>((resolve) => { setImmediate(() => { resolve(false) }) }),
+    ])
+    expect(returned).toBe(false)
+    expect(harness.orc.state(harness.supervisor).delegations.at(-1)).toMatchObject({ kind: stage, status: 'open' })
+    const field = stage === 'codex-spec' ? 'spec' : 'plan'
+    finish({ output: [{ type: 'text', text: JSON.stringify({ stage, [field]: '  Codex document  ' }) }], stopReason: 'completed' })
+    const result = await pending
+    expect(result.isError, text(result)).toBe(false)
+    expect(JSON.parse(text(result))).toMatchObject({ kind: stage, status: 'ok', [`${field}Text`]: 'Codex document' })
+    expect(harness.supervisor.session.snapshotEvents().some(event => event.type === `orc/${field}/result`)).toBe(true)
+  })
+
+  it('filters the Peer catalog even when its Lead catalog already hides Codex tools', async () => {
+    const harness = await setup()
+    const spawnTools = ['subagent', 'subagent_fork', 'subagent_codex_spec', 'subagent_codex_review', 'subagent_codex_audit', 'subagent_grok']
+    for (const name of [...spawnTools, 'read_file']) {
+      harness.ctx.tools.register(defineTool({
+        name,
+        description: 'Test capability',
+        parameters: {},
+        output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+        execute: () => 'allowed',
+      }))
+    }
+    await reachImplementation(harness)
+    const leadLaunch = await harness.orc.spawn(harness.supervisor, leadInput())
+    const lead = await publishLaunch(harness.ctx, leadLaunch)
+    lead.ctx.tools.restrict(harness.fake.continuable.at(-1)!.request.toolFilter!)
+    const leadNames = harness.ctx.tools.schemas(lead).map(tool => tool.name)
+    expect(leadNames).toContain('orc_spawn')
+    for (const name of spawnTools) {
+      expect(leadNames).not.toContain(name)
+      expect((await execute(harness.ctx, lead, name, {})).isError).toBe(true)
+    }
+    await harness.orc.startTask(harness.supervisor, { taskId: OrcTaskId(TASK), leadNodeId: leadLaunch.nodeId! })
+    const peerLaunch = await harness.orc.spawn(lead, peerInput())
+    const peer = await publishLaunch(harness.ctx, peerLaunch)
+    peer.ctx.tools.restrict(harness.fake.continuable.at(-1)!.request.toolFilter!)
+    const names = harness.ctx.tools.schemas(peer).map(tool => tool.name)
+    expect(names).toContain('read_file')
+    for (const name of spawnTools) {
+      expect(names).not.toContain(name)
+      expect((await execute(harness.ctx, peer, name, {})).isError).toBe(true)
+    }
+    expect((await execute(harness.ctx, peer, 'read_file', {})).isError).toBe(false)
+  })
+
   it('registers one stable catalog and distinct role sections', async () => {
     const harness = await setup()
     const before = await schemasOf(harness.ctx, harness.supervisor)
     const initial = await promptOf(harness.ctx, harness.supervisor)
     expect(initial).toContain('role: unassigned')
-    expect(initial).toContain('Superpowers workflow requirements apply when the workflow opens.')
+    expect(initial).toContain('orc_request_spec_plan')
+    expect(initial).toContain('ORC supervisor procedure:')
     await reachImplementation(harness)
     const leadLaunch = await harness.orc.spawn(harness.supervisor, leadInput())
     const lead = await publishLaunch(harness.ctx, leadLaunch)
@@ -302,6 +371,9 @@ describe('dsh-tool-orc', () => {
     const leadPrompt = await promptOf(harness.ctx, lead)
     const peerPrompt = await promptOf(harness.ctx, peer)
     expect(supervisorPrompt).toContain('role: supervisor')
+    expect(supervisorPrompt).toContain('orc_request_spec_plan')
+    expect(leadPrompt).not.toContain('orc_request_spec_plan')
+    expect(peerPrompt).not.toContain('orc_request_spec_plan')
     expect(supervisorPrompt).toContain('parent: none')
     expect(supervisorPrompt).toContain('may create Leads')
     expect(supervisorPrompt).toContain('phase: task_implementation')
@@ -639,8 +711,18 @@ describe('dsh-tool-orc', () => {
     expect(openedPrompt).toContain('role: supervisor')
     expect(openedPrompt).toContain('Superpowers workflow requirements')
     expect(openedPrompt).not.toContain('Superpowers workflow requirements apply when the workflow opens.')
+    harness.fake.queue.push(Promise.resolve({
+      output: [{ type: 'text', text: JSON.stringify({ stage: 'codex-spec', spec: 'design is complete' }) }],
+      stopReason: 'completed',
+    }))
     const spec = await execute(harness.ctx, harness.supervisor, 'orc_request_spec_plan', { context_ref: 'brainstorm-1' })
     expect(spec.isError, text(spec)).toBe(false)
+    expect(JSON.parse(text(spec))).toMatchObject({
+      kind: 'codex-spec',
+      spawned: true,
+      status: 'ok',
+      specText: 'design is complete',
+    })
     const forgedSpec = await execute(harness.ctx, harness.supervisor, 'orc_record_result', {
       correlation_id: 'spec-row',
       stage: 'codex-spec',
@@ -650,8 +732,8 @@ describe('dsh-tool-orc', () => {
     })
     expect(errorCode(forgedSpec)).toBe('ORC_UNAUTHORIZED')
     expect(text(forgedSpec)).toMatch(/cannot record a codex result/)
-    expect(harness.orc.state(harness.supervisor).specText).toBeUndefined()
-    expect(harness.orc.state(harness.supervisor).delegations.some(item => item.kind === 'codex-spec' && item.status === 'open')).toBe(true)
+    expect(harness.orc.state(harness.supervisor).specText).toBe('design is complete')
+    expect(harness.orc.state(harness.supervisor).delegations.some(item => item.kind === 'codex-spec' && item.status === 'ok')).toBe(true)
     const shot = harness.fake.oneShot.at(-1)
     expect(shot?.request.outputSchema).toBeUndefined()
     expect(shot?.request.maxDepth).toBeUndefined()
@@ -687,6 +769,29 @@ describe('dsh-tool-orc', () => {
     expect(logged?.skillEnvelope).toContain('Superpowers workflow requirements')
     expect(leadPrompt).toContain(logged?.skillEnvelope ?? 'missing skill envelope')
     expect(leadPrompt).toContain(logged?.prompt ?? 'missing prompt')
+  })
+
+  it('refuses a blocking set that differs from config', async () => {
+    const harness = await setup()
+    const raised = await execute(harness.ctx, harness.supervisor, 'orc_create_workflow', {
+      responsibility: 'brainstorm the workflow',
+      write_scope: ['repo'],
+      acceptance_criteria: 'run reaches complete',
+      reporting_format: 'durable events',
+      blocking_severities: ['critical', 'high', 'medium', 'low'],
+    })
+    expect(errorCode(raised)).toBe('ORC_REFUSED')
+    expect(text(raised)).toMatch(/differ from config/)
+    expect(harness.orc.state(harness.supervisor).runId).toBeUndefined()
+    const matched = await execute(harness.ctx, harness.supervisor, 'orc_create_workflow', {
+      responsibility: 'brainstorm the workflow',
+      write_scope: ['repo'],
+      acceptance_criteria: 'run reaches complete',
+      reporting_format: 'durable events',
+      blocking_severities: ['medium', 'critical', 'high'],
+    })
+    expect(matched.isError, text(matched)).toBe(false)
+    expect(harness.orc.state(harness.supervisor).blockingSeverities).toEqual([...BLOCKING])
   })
 
   it('rejects malformed identifiers and stages before the service', async () => {

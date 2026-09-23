@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { z } from 'zod'
-import { runCodexFinalLoop, runCodexTaskLoop, settleCodexRun, type OrcFixWork } from './codex-dispatch.ts'
+import { runCodexFinalLoop, runCodexTaskLoop, settleCodexRun, type OrcCodexSettlement, type OrcFixWork } from './codex-dispatch.ts'
 import type { OrcCodexStage } from './codex-results.ts'
 import { renderCodexEnvelope } from './envelope.ts'
 import {
@@ -83,6 +83,16 @@ const routeSchema = z.object({
   effort: z.string().min(1),
 }).strict()
 
+const severitySchema = z.enum(['critical', 'high', 'medium', 'low', 'info'])
+
+const blockingSeveritiesSchema = z.array(severitySchema).min(1).refine(
+  values => new Set(values).size === values.length,
+  { message: 'blocking severities must be unique' },
+).refine(
+  values => (['critical', 'high', 'medium'] as const).every(severity => values.includes(severity)),
+  { message: 'blockingSeverities must include critical, high, and medium' },
+)
+
 const configSchema = z.object({
   deepseek: routeSchema,
   codexSpec: routeSchema,
@@ -95,6 +105,7 @@ const configSchema = z.object({
   planOutputSchema: z.string().min(1),
   reviewOutputSchema: z.string().min(1),
   auditOutputSchema: z.string().min(1),
+  blockingSeverities: blockingSeveritiesSchema,
 }).strict()
 
 /** Validated deployment routes. Execution copies these fields and does not invent models. */
@@ -103,14 +114,13 @@ export type OrcServiceConfig = z.infer<typeof configSchema>
 /** One configured provider, model, and effort triple. */
 export type OrcRouteConfig = z.infer<typeof routeSchema>
 
-/** Fields copied into a Supervisor root. */
+/** Fields copied into a Supervisor root. Blocking severities come from {@link OrcServiceConfig}. */
 export interface OrcCreateWorkflowInput {
   readonly prompt: string
   readonly skillEnvelope: string
   readonly writeScope: readonly string[]
   readonly acceptanceCriteria: string
   readonly reportingFormat: string
-  readonly blockingSeverities: readonly OrcSeverity[]
 }
 
 /** Lead or Peer creation. The projection accepts only Supervisor → Lead and Lead → Peer. */
@@ -252,6 +262,15 @@ function assistantText(data: unknown): string | undefined {
   return text !== undefined && text.trim() !== '' ? text : undefined
 }
 
+const ORC_CHILD_DENY = [
+  'subagent',
+  'subagent_fork',
+  'subagent_codex_spec',
+  'subagent_codex_review',
+  'subagent_codex_audit',
+  'subagent_grok',
+] as const
+
 function codexPrompt(fields: {
   readonly role: 'spec-only' | 'plan-only' | 'review-only' | 'audit-only'
   readonly stage: 'codex-spec' | 'codex-plan' | 'codex-review' | 'codex-audit'
@@ -294,7 +313,7 @@ export class OrcService extends Service {
 
   private readonly config: OrcServiceConfig
   private readonly live = new Map<string, LiveContinuation>()
-  private readonly codexJobs = new Map<string, Promise<OrcState>>()
+  private readonly codexJobs = new Map<string, { input: OrcCodexSettlement; job?: Promise<OrcState> }>()
   private planReviewChain: Promise<void> = Promise.resolve()
 
   /**
@@ -337,7 +356,7 @@ export class OrcService extends Service {
   /**
    * Open a Supervisor run on the caller's session.
    * @param caller - Supervisor agent. Its id becomes the root node id.
-   * @param input - prompt, scope, and caller-supplied blocking severities.
+   * @param input - prompt and scope. Blocking severities are copied from config.
    * @returns the projected run.
    */
   async createWorkflow(caller: Agent, input: OrcCreateWorkflowInput): Promise<OrcState> {
@@ -347,7 +366,7 @@ export class OrcService extends Service {
       data: {
         version: 1,
         runId: OrcRunId(randomUUID()),
-        blockingSeverities: [...input.blockingSeverities],
+        blockingSeverities: [...this.config.blockingSeverities],
         supervisorNodeId: OrcNodeId(caller.id),
         prompt: input.prompt,
         skillEnvelope: input.skillEnvelope,
@@ -558,6 +577,7 @@ export class OrcService extends Service {
     if (refused.failure !== undefined) throw new OrcError(refused.failure)
     // The child reads its role from this log while its system section is assembled.
     await this.commit(session, event)
+    const toolFilter = this.childToolFilter(actor)
     try {
       const started = await this.ctx.subagents.startContinuable({
         provider: route.subagentProvider,
@@ -571,6 +591,7 @@ export class OrcService extends Service {
             model: route.model,
             reasoningEffort: ReasoningEffortId(route.effort),
           },
+          ...(toolFilter === undefined ? {} : { toolFilter }),
         },
         signal: input.signal,
       })
@@ -593,11 +614,13 @@ export class OrcService extends Service {
 
   /**
    * Record that the named Lead started the active task.
-   * @param caller - agent acting for the Supervisor session.
+   * The caller must be the supervisor or the Lead that owns the task.
+   * @param caller - supervisor, or the Lead named by `leadNodeId`.
    * @param input - task id and Lead node id.
    * @returns the projected run.
    */
   async startTask(caller: Agent, input: { readonly taskId: OrcTaskId; readonly leadNodeId: OrcNodeIdentity }): Promise<OrcState> {
+    this.requireTaskCaller(caller, input.taskId, input.leadNodeId)
     const session = this.sessionFor(caller)
     return this.commit(session, {
       type: 'orc/task/started',
@@ -607,7 +630,8 @@ export class OrcService extends Service {
 
   /**
    * Record Lead settlement after the projection accepts it.
-   * @param caller - agent acting for the Supervisor session.
+   * The caller must be the supervisor or the Lead that owns the task.
+   * @param caller - supervisor, or the Lead named by `leadNodeId`.
    * @param input - task id, Lead node id, and evidence.
    * @returns the projected run.
    */
@@ -616,6 +640,7 @@ export class OrcService extends Service {
     readonly leadNodeId: OrcNodeIdentity
     readonly evidence: string
   }): Promise<OrcState> {
+    this.requireTaskCaller(caller, input.taskId, input.leadNodeId)
     const session = this.sessionFor(caller)
     return this.commit(session, {
       type: 'orc/task/settled',
@@ -674,7 +699,8 @@ export class OrcService extends Service {
 
   /**
    * Record the fix decision for the active task.
-   * @param caller - agent acting for the Supervisor session.
+   * The caller must be the supervisor or the Lead that owns the task.
+   * @param caller - supervisor, or the Lead that owns `taskId`.
    * @param input - task id, next iteration, and decision text.
    * @returns the projected run.
    */
@@ -684,6 +710,7 @@ export class OrcService extends Service {
     readonly decision: string
     readonly assigneeNodeId?: OrcNodeIdentity
   }): Promise<OrcState> {
+    this.requireTaskCaller(caller, input.taskId)
     const session = this.sessionFor(caller)
     return this.commit(session, {
       type: 'orc/fix/iteration',
@@ -742,15 +769,40 @@ export class OrcService extends Service {
   }
 
   /**
+   * Record terminal success after a clean branch review and audit.
+   * Only the Supervisor may call this. The final-gates tool is the caller that checks the pair first.
+   * @param caller - Supervisor agent.
+   * @returns the projected run in `complete`.
+   */
+  async complete(caller: Agent): Promise<OrcState> {
+    this.requireSupervisorCaller(caller)
+    const actor = this.callerAgent(caller)
+    const session = this.sessionFor(actor)
+    return this.commit(session, {
+      type: 'orc/run/completed',
+      data: { version: 1, runId: this.requireRun(this.readState(session)), actorNodeId: OrcNodeId(actor.id) },
+    })
+  }
+
+  /**
+   * Blocking severities pinned by deployment config.
+   * @returns the configured set. Tool arguments cannot replace it.
+   */
+  configuredBlockingSeverities(): readonly OrcSeverity[] {
+    return this.config.blockingSeverities
+  }
+
+  /**
    * Wait until the in-process Codex final text for this correlation is recorded.
+   * If storage rejected every result append, a later call retries a blocking settlement with the retained text.
    * A new process can see the open row and still have no result promise. This refuses that row instead of recording a clean report.
    * @param caller - Supervisor that owns the run.
    * @param correlationId - delegation id returned by the Codex start.
    * @returns the projected run after the parsed or blocking result is recorded.
    */
   async awaitCodex(caller: Agent, correlationId: OrcCorrelationIdentity): Promise<OrcState> {
-    const job = this.codexJobs.get(correlationId)
-    if (job !== undefined) return job
+    const pending = this.codexJobs.get(correlationId)
+    if (pending !== undefined) return pending.job ?? this.settleObservedCodex(caller, pending)
     const state = this.readState(this.sessionFor(caller))
     const delegation = state.delegations.find(item => item.correlationId === correlationId)
     if (delegation !== undefined && delegation.status !== 'open') return state
@@ -761,6 +813,42 @@ export class OrcService extends Service {
   /** Refuse spec, approval, assignment, review, audit, and Codex results from anyone but the Supervisor. */
   private requireSupervisorCaller(caller: Agent): void {
     if (this.roleOf(caller) !== 'supervisor') throw new OrcError('only the supervisor may perform this operation')
+  }
+
+  /** Refuse task start, settlement, and fix records from anyone but the supervisor or the owning Lead. */
+  private requireTaskCaller(caller: Agent, taskId: OrcTaskId, leadNodeId?: OrcNodeIdentity): void {
+    const actor = this.callerAgent(caller)
+    if (this.roleOf(actor) === 'supervisor') return
+    const located = this.locate(actor)
+    if (located?.node.role !== 'lead' || located.node.taskId !== taskId) {
+      throw new OrcError('only the supervisor or the owning lead may perform this operation')
+    }
+    if (leadNodeId !== undefined && located.node.id !== leadNodeId) {
+      throw new OrcError('only the supervisor or the owning lead may perform this operation')
+    }
+  }
+
+  /**
+   * Children create agents only through role-authorized ORC operations.
+   * Names the parent does not have are omitted so `tools.restrict` does not reject the child.
+   */
+  private childToolFilter(caller: Agent): { readonly deny: readonly string[] } | undefined {
+    const known = this.knownToolNames(caller)
+    // Children join the preset, not the parent's private restrictions. Include tools hidden on the Lead.
+    const supervisor = this.ctx.agents.get(this.sessionFor(caller).id)
+    if (supervisor !== undefined) {
+      for (const name of this.knownToolNames(supervisor)) known.add(name)
+    }
+    const deny = ORC_CHILD_DENY.filter(name => known.has(name))
+    return deny.length === 0 ? undefined : { deny }
+  }
+
+  /** Tool names visible to the caller. Absent tools service means no child filter. */
+  private knownToolNames(caller: Agent): Set<string> {
+    const tools = (this.ctx as unknown as { get(name: string): unknown }).get('tools')
+    if (typeof tools !== 'object' || tools === null || !('schemas' in tools)) return new Set()
+    const schemas = (tools as { schemas(agent: Agent): readonly { readonly name: string }[] }).schemas(caller)
+    return new Set(schemas.map(tool => tool.name))
   }
 
   private callerAgent(caller: Agent): Agent {
@@ -1265,6 +1353,11 @@ export class OrcService extends Service {
         review = { seq: event.seq, correlation: parsed.correlation, decision: parsed.decision }
       }
     }
+    const unconsumedApproval = review?.decision === 'approved'
+      && (planResultSeq === null || review.seq <= planResultSeq)
+    if (unconsumedApproval && (event === undefined || eventType === 'plan/review')) {
+      this.retainUnconsumedExit(session)
+    }
     if (review === null || planResultSeq === null) return
     if (review.decision !== 'approved' && review.decision !== 'rejected') return
     if (review.seq <= planResultSeq) return
@@ -1300,6 +1393,28 @@ export class OrcService extends Service {
     })
   }
 
+  /**
+   * Keep plan mode active when an approved `plan/review` cannot be consumed yet.
+   * `exit_plan_mode` queues plan mode off before this microtask. Cancelling that queue lets the tool run again
+   * after the ok plan result is durable. `/plan off` does not append `plan/review`, so it is left alone.
+   */
+  private retainUnconsumedExit(session: Session): void {
+    const gate = (this.ctx as unknown as { get(name: string): unknown }).get('planMode')
+    if (typeof gate !== 'object' || gate === null || !('get' in gate) || !('set' in gate)) return
+    const planMode = gate as {
+      get(agent: Agent): { active: boolean; pending?: boolean }
+      set(agent: Agent, active: boolean): string
+    }
+    const state = this.readState(session)
+    if (state.approval === 'approved') return
+    const supervisor = state.nodes.find(node => node.role === 'supervisor')
+    if (supervisor === undefined) return
+    const agent = this.ctx.agents.get(SessionId(String(supervisor.id)))
+    if (agent === undefined) return
+    const current = planMode.get(agent)
+    if (current.active === false || current.pending === false) planMode.set(agent, true)
+  }
+
   /** Attach a handler before later commits, so a start that never reaches settlement still observes a rejection. */
   private observeRejection(result: Promise<SubagentResult>): void {
     void result.then(() => undefined, (error: unknown) => {
@@ -1315,15 +1430,24 @@ export class OrcService extends Service {
     readonly role: 'spec-only' | 'plan-only' | 'review-only' | 'audit-only'
     readonly taskId?: OrcTaskId
   }): void {
-    const job = settleCodexRun(this, caller, { ...observed, result })
-    this.codexJobs.set(observed.correlationId, job)
+    const pending = { input: { ...observed, result } }
+    this.codexJobs.set(observed.correlationId, pending)
+    this.settleObservedCodex(caller, pending)
+  }
+
+  /** Retain unsettled evidence across storage failures; retry only when a caller awaits again. */
+  private settleObservedCodex(caller: Agent, pending: { input: OrcCodexSettlement; job?: Promise<OrcState> }): Promise<OrcState> {
+    const job = settleCodexRun(this, caller, pending.input)
+    pending.job = job
     void job.then(() => {
-      this.codexJobs.delete(observed.correlationId)
+      this.codexJobs.delete(pending.input.correlationId)
     }, (error: unknown) => {
-      this.codexJobs.delete(observed.correlationId)
-      // awaitCodex returns this job. A caller that never awaits it must not leave the rejection unhandled.
+      pending.input = { ...pending.input, recordingFailed: true }
+      delete pending.job
+      // The awaiting caller receives the error; the retained result remains available for settlement.
       void error
     })
+    return job
   }
 }
 

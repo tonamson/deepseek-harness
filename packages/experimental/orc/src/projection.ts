@@ -879,9 +879,8 @@ function recordReport(
   if (delegation.status !== 'open') return refuse(state, 'delegation is already settled')
   const seen = new Set<string>()
   for (const finding of data.findings) {
-    if (seen.has(finding.id) || state.findings.some(existing => existing.id === finding.id)) {
-      return refuse(state, 'duplicate finding id')
-    }
+    // The same id in one report is a bad document. The same id on a later report reopens that finding.
+    if (seen.has(finding.id)) return refuse(state, 'duplicate finding id')
     seen.add(finding.id)
     if (finding.taskId !== undefined && delegation.scope === 'task' && finding.taskId !== delegation.taskId) {
       return refuse(state, 'finding task does not match the report')
@@ -897,29 +896,33 @@ function recordReport(
   const scope: OrcReviewScope = delegation.scope
   const blocksProgress = data.status !== 'ok'
     || data.findings.some(finding => state.blockingSeverities.includes(finding.severity))
+  const storedFindings = data.findings.map((finding) => {
+    const taskId = finding.taskId ?? delegation.taskId
+    return {
+      id: finding.id,
+      severity: finding.severity,
+      status: 'open' as const,
+      summary: finding.summary,
+      correlationId: delegation.correlationId,
+      scope,
+      iteration: delegation.iteration,
+      ...(taskId === undefined ? {} : { taskId }),
+      ...(finding.file === undefined ? {} : { file: finding.file }),
+      ...(finding.location === undefined ? {} : { location: finding.location }),
+      ...(finding.evidence === undefined ? {} : { evidence: finding.evidence }),
+      ...(finding.remediation === undefined ? {} : { remediation: finding.remediation }),
+      ...(finding.sourceStage === undefined ? {} : { sourceStage: finding.sourceStage }),
+    }
+  })
+  const incoming = new Map(storedFindings.map(finding => [finding.id, finding]))
+  const findings = state.findings.map(existing => incoming.get(existing.id) ?? existing)
+  const present = new Set(state.findings.map(finding => finding.id))
+  for (const finding of storedFindings) {
+    if (!present.has(finding.id)) findings.push(finding)
+  }
   return {
     ...state,
-    findings: [
-      ...state.findings,
-      ...data.findings.map((finding) => {
-        const taskId = finding.taskId ?? delegation.taskId
-        return {
-          id: finding.id,
-          severity: finding.severity,
-          status: 'open' as const,
-          summary: finding.summary,
-          correlationId: delegation.correlationId,
-          scope,
-          iteration: delegation.iteration,
-          ...(taskId === undefined ? {} : { taskId }),
-          ...(finding.file === undefined ? {} : { file: finding.file }),
-          ...(finding.location === undefined ? {} : { location: finding.location }),
-          ...(finding.evidence === undefined ? {} : { evidence: finding.evidence }),
-          ...(finding.remediation === undefined ? {} : { remediation: finding.remediation }),
-          ...(finding.sourceStage === undefined ? {} : { sourceStage: finding.sourceStage }),
-        }
-      }),
-    ],
+    findings,
     delegations: state.delegations.map(item => item.correlationId === data.correlationId
       ? {
         ...item,

@@ -50,7 +50,7 @@ The catalog is one list for every role:
 - **Create and settle** — `orc_spawn`, `orc_start_task`, and `orc_settle_task`.
 - **Report** — `orc_record_result` records a DeepSeek node only. Codex spec, plan, review, and audit results are not a model tool. `orc_record_fix` records a fix decision.
 
-`orc_request_spec_plan` takes `context_ref` and is the only call that enters `spec_required` or `plan_required`. No ORC tool accepts an approval decision. `orc_run_task_gates` and `orc_run_final_gates` send blocking findings to the existing Lead. Review and audit stay separate. A malformed or missing Codex result stays a service failure.
+`orc_request_spec_plan` takes `context_ref`, waits for the Codex answer, and returns the status plus the normalized spec or plan text. It is the only call that enters `spec_required` or `plan_required`. No ORC tool accepts an approval decision. `orc_run_task_gates` and `orc_run_final_gates` send blocking findings to the existing Lead. Review and audit stay separate. A malformed or missing Codex result stays a service failure.
 
 ### Logged model input
 
