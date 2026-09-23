@@ -54,6 +54,7 @@ export { REGION_BEGIN, REGION_END }
  * errors, so the partition can never silently drift from the service API.
  */
 export const SERVICE_PAGE: Record<string, string> = {
+  orc: 'orc.md',
   connection: 'web-server.md',
   pluginManager: 'boot.md',
   profileContext: 'boot.md',
@@ -261,6 +262,20 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  OrcCorrelationIdentity: 'orc.md',
+  OrcCreateWorkflowInput: 'orc.md',
+  OrcLaunch: 'orc.md',
+  OrcNode: 'orc.md',
+  OrcNodeIdentity: 'orc.md',
+  OrcRegistration: 'orc.md',
+  OrcReportRequest: 'orc.md',
+  OrcResultInput: 'orc.md',
+  OrcRole: 'orc.md',
+  OrcSeverity: 'orc.md',
+  OrcSpawnInput: 'orc.md',
+  OrcState: 'orc.md',
+  OrcTaskId: 'orc.md',
+  OrcWorkflowPhase: 'orc.md',
   WorkspaceChangesSummary: 'deliverables.md',
   WorkspaceFileDiff: 'deliverables.md',
   Reload: 'boot.md',

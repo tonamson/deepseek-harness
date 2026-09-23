@@ -462,7 +462,8 @@ describe('ORC task caller', () => {
         return 'cancelled'
       }
     })
-    const agents = harness.ctx.get('agents') as FakeAgents
+    const agents = harness.ctx.get('agents')
+    if (!(agents instanceof FakeAgents)) throw new Error('expected fake agent registry')
     agents.lookup = harness.supervisor
     harness.supervisor.session.append('plan/review', { version: 1, correlation: 'early-review', decision: 'approved' })
     await harness.service.planReviewSettled()

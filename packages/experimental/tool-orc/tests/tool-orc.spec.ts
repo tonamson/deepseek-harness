@@ -314,7 +314,7 @@ describe('dsh-tool-orc', () => {
         description: 'Test capability',
         parameters: {},
         output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
-        execute: () => 'allowed',
+        execute: async () => 'allowed',
       }))
     }
     await reachImplementation(harness)

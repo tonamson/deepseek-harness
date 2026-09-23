@@ -151,7 +151,7 @@ function taskAssigned(taskId: OrcTaskIdentity): OrcEvent {
   }
 }
 
-function node(role: 'lead' | 'peer', nodeId: OrcNodeIdentity, parentId: OrcNodeIdentity, taskId: OrcTaskIdentity, correlationId: string): OrcEvent {
+function node(role: 'lead' | 'peer', nodeId: OrcNodeIdentity, parentId: OrcNodeIdentity, taskId: OrcTaskIdentity, correlationId: string): Extract<OrcEvent, { type: 'orc/node/created' }> {
   return {
     type: 'orc/node/created',
     data: {

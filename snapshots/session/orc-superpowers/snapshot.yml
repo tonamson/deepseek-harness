@@ -6,8 +6,8 @@ recording: authored
 header:
   class: orc-superpowers
   pin: true
-  changes: 8
-  promptChanges: 8
+  changes: 9
+  promptChanges: 9
   childSystemPrompts: [1, 2]
   childToolSchemas: [1, 2]
 replay:
