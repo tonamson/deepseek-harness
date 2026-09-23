@@ -10,6 +10,7 @@ import {
 } from '../src/projection.ts'
 import type {
   OrcEvent,
+  OrcNodeId as OrcNodeIdentity,
   OrcNodeOutcome,
   OrcReportStatus,
   OrcReviewScope,
@@ -87,7 +88,7 @@ function specResult(status: OrcReportStatus = 'ok'): OrcEvent {
   }
 }
 
-function phase(to: OrcWorkflowPhase, taskId?: OrcTaskId, actorNodeId: OrcNodeId = SUPERVISOR): OrcEvent {
+function phase(to: OrcWorkflowPhase, taskId?: OrcTaskIdentity, actorNodeId: OrcNodeIdentity = SUPERVISOR): OrcEvent {
   return {
     type: 'orc/phase',
     data: {
@@ -137,7 +138,7 @@ function approval(decision: 'approved' | 'rejected'): OrcEvent {
   }
 }
 
-function taskAssigned(taskId: OrcTaskId): OrcEvent {
+function taskAssigned(taskId: OrcTaskIdentity): OrcEvent {
   return {
     type: 'orc/task/assigned',
     data: {
@@ -150,7 +151,7 @@ function taskAssigned(taskId: OrcTaskId): OrcEvent {
   }
 }
 
-function node(role: 'lead' | 'peer', nodeId: OrcNodeId, parentId: OrcNodeId, taskId: OrcTaskId, correlationId: string): OrcEvent {
+function node(role: 'lead' | 'peer', nodeId: OrcNodeIdentity, parentId: OrcNodeIdentity, taskId: OrcTaskIdentity, correlationId: string): OrcEvent {
   return {
     type: 'orc/node/created',
     data: {
@@ -170,7 +171,7 @@ function node(role: 'lead' | 'peer', nodeId: OrcNodeId, parentId: OrcNodeId, tas
   }
 }
 
-function taskStarted(taskId: OrcTaskId, leadNodeId: OrcNodeId): OrcEvent {
+function taskStarted(taskId: OrcTaskIdentity, leadNodeId: OrcNodeIdentity): OrcEvent {
   return {
     type: 'orc/task/started',
     data: { version: 1, runId: RUN, taskId, leadNodeId },
@@ -204,7 +205,7 @@ function eventsThroughPeer(): OrcEvent[] {
   ]
 }
 
-function nodeSettled(nodeId: OrcNodeId, outcome: OrcNodeOutcome, evidence?: string): OrcEvent {
+function nodeSettled(nodeId: OrcNodeIdentity, outcome: OrcNodeOutcome, evidence?: string): OrcEvent {
   return {
     type: 'orc/node/settled',
     data: {
@@ -217,7 +218,7 @@ function nodeSettled(nodeId: OrcNodeId, outcome: OrcNodeOutcome, evidence?: stri
   }
 }
 
-function taskSettled(taskId: OrcTaskIdentity, leadNodeId: OrcNodeId): OrcEvent {
+function taskSettled(taskId: OrcTaskIdentity, leadNodeId: OrcNodeIdentity): OrcEvent {
   return {
     type: 'orc/task/settled',
     data: { version: 1, runId: RUN, taskId, leadNodeId, evidence: `settled ${taskId}` },
@@ -284,11 +285,11 @@ function fixIteration(taskId: OrcTaskIdentity, iteration: number): OrcEvent {
   }
 }
 
-function runFailed(reason: string, actorNodeId: OrcNodeId = SUPERVISOR): OrcEvent {
+function runFailed(reason: string, actorNodeId: OrcNodeIdentity = SUPERVISOR): OrcEvent {
   return { type: 'orc/run/failed', data: { version: 1, runId: RUN, actorNodeId, reason } }
 }
 
-function runCompleted(actorNodeId: OrcNodeId = SUPERVISOR): OrcEvent {
+function runCompleted(actorNodeId: OrcNodeIdentity = SUPERVISOR): OrcEvent {
   return { type: 'orc/run/completed', data: { version: 1, runId: RUN, actorNodeId } }
 }
 

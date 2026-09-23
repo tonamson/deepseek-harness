@@ -10,7 +10,16 @@ import {
   OrcRunId,
   OrcTaskId,
 } from '../src/projection.ts'
-import type { OrcEvent, OrcNodeOutcome, OrcReportStatus, OrcReviewScope, OrcSeverity, OrcWorkflowPhase } from '../src/types.ts'
+import type {
+  OrcEvent,
+  OrcNodeId as OrcNodeIdentity,
+  OrcNodeOutcome,
+  OrcReportStatus,
+  OrcReviewScope,
+  OrcSeverity,
+  OrcTaskId as OrcTaskIdentity,
+  OrcWorkflowPhase,
+} from '../src/types.ts'
 import * as OrcInvariant from '../src/invariant.ts'
 
 const RUN = OrcRunId('run-1')
@@ -130,7 +139,7 @@ function planResult(): OrcEvent {
   }
 }
 
-function node(role: 'lead' | 'peer', nodeId: OrcNodeId, parentId: OrcNodeId, taskId: OrcTaskId, correlationId: string): OrcEvent {
+function node(role: 'lead' | 'peer', nodeId: OrcNodeIdentity, parentId: OrcNodeIdentity, taskId: OrcTaskIdentity, correlationId: string): OrcEvent {
   return {
     type: 'orc/node/created',
     data: {
@@ -150,7 +159,7 @@ function node(role: 'lead' | 'peer', nodeId: OrcNodeId, parentId: OrcNodeId, tas
   }
 }
 
-function nodeSettled(nodeId: OrcNodeId, outcome: OrcNodeOutcome, evidence?: string): OrcEvent {
+function nodeSettled(nodeId: OrcNodeIdentity, outcome: OrcNodeOutcome, evidence?: string): OrcEvent {
   return {
     type: 'orc/node/settled',
     data: {
@@ -163,7 +172,7 @@ function nodeSettled(nodeId: OrcNodeId, outcome: OrcNodeOutcome, evidence?: stri
   }
 }
 
-function taskAssigned(taskId: OrcTaskId): OrcEvent {
+function taskAssigned(taskId: OrcTaskIdentity): OrcEvent {
   return {
     type: 'orc/task/assigned',
     data: {
