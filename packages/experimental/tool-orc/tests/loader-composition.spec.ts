@@ -115,9 +115,25 @@ class FakeSubagents extends Service {
     // Nested so the reply runs after sendMessage's await continuation admits the watcher.
     queueMicrotask(() => {
       queueMicrotask(() => {
-        if (this.deliverReply) this.appendLeadReply(lead, `fixed ${String(targetId)}`)
+        const decision = `fixed ${String(targetId)}`
+        if (this.deliverReply) this.appendLeadReply(lead, decision)
         writable.status = 'idle'
         this.owner.emit('agent/status', { agent: lead, status: 'idle' })
+        if (!this.deliverReply) return
+        queueMicrotask(() => {
+          _sender.session.append('agent/inbox/spliced', {
+            target: 'next-step',
+            start: 0,
+            inserted: [createMessage({
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Its closing message:' },
+                { type: 'text', text: decision },
+              ],
+              source: { kind: 'user' },
+            })],
+          })
+        })
       })
     })
     return 'fix-message'
@@ -595,6 +611,20 @@ describe('ORC plan approval and fix loop', () => {
       sourceStage: 'codex-review',
       taskId: 'task-a',
     }
+    const leadId = String(leadLaunch.nodeId)
+    harness.supervisor.session.append('agent/inbox/spliced', {
+      target: 'next-step',
+      start: 0,
+      inserted: [createMessage({
+        role: 'user',
+        content: [
+          { type: 'text', text: `Background subagent ${leadId} finished and will do no further work unless you send it more.` },
+          { type: 'text', text: 'Its closing message:' },
+          { type: 'text', text: 'lead ready' },
+        ],
+        source: { kind: 'user' },
+      })],
+    })
     harness.fake.queue.push(Promise.resolve(codexText('codex-review', { stage: 'codex-review', findings: [finding] })))
     harness.fake.queue.push(Promise.resolve(codexText('codex-audit', { stage: 'codex-audit', findings: [] })))
     harness.fake.queue.push(Promise.resolve(codexText('codex-review', { stage: 'codex-review', findings: [] })))
@@ -609,6 +639,17 @@ describe('ORC plan approval and fix loop', () => {
     expect(harness.fake.sent[0]?.text).toContain('remediation: check')
     expect(gated.tasks[0]?.fixDecision).toBe(`fixed ${String(leadLaunch.nodeId)}`)
     expect(gated.tasks[0]?.fixDecision).not.toBe('stale reply')
+    const noticeRows = plainEvents(harness.supervisor.session).flatMap((event) => {
+      if (event.type !== 'agent/inbox/spliced') return []
+      const inserted = (event.data as { inserted?: { content?: { type?: string; text?: string }[] }[] }).inserted ?? []
+      const closing = inserted.flatMap(message => message.content ?? []).filter(block => block.type === 'text').at(-1)?.text
+      return closing === undefined ? [] : [{ seq: event.seq, closing }]
+    })
+    const priorNotice = noticeRows.find(row => row.closing === 'lead ready')
+    const fixNotice = noticeRows.find(row => row.closing === `fixed ${String(leadLaunch.nodeId)}`)
+    const fixIteration = plainEvents(harness.supervisor.session).find(event => event.type === 'orc/fix/iteration')
+    expect(priorNotice?.seq).toBeLessThan(fixNotice?.seq ?? -1)
+    expect(fixIteration?.seq).toBeGreaterThan(fixNotice?.seq ?? Number.POSITIVE_INFINITY)
     expect(gated.phase).toBe('final_review')
     const phases = plainEvents(harness.supervisor.session).flatMap(event =>
       event.type === 'orc/phase' && event.data.to !== undefined ? [event.data.to] : [])

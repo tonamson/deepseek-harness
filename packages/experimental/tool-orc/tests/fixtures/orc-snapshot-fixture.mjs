@@ -97,7 +97,7 @@ async function whenLeadReady(ctx, caller) {
   throw new Error(`orc snapshot lead wait timed out lead=${lead === undefined ? 'missing' : String(lead.id)} peer=${peer}`)
 }
 
-/** Peer completion has to land before orc_spawn returns, or the Lead turn races the notice. */
+/** Peer completion has to land before orc_spawn returns, or the Lead turn races the notice. OrcService commits the node before startContinuable. */
 async function peerTurnEnded(ctx, childId) {
   const deadline = Date.now() + 5_000
   while (Date.now() < deadline) {

@@ -352,6 +352,28 @@ describe('ORC role edges', () => {
     ])).toMatch(/peer cannot spawn a child/)
   })
 
+  it('records messageId on the open node without adding a second node', () => {
+    const created = node('lead', LEAD_A, SUPERVISOR, TASK_A, 'corr-lead-a')
+    const state = replay([
+      ...throughAwaiting(),
+      approval('approved'),
+      taskAssigned(TASK_A),
+      phase('task_implementation'),
+      created,
+      { ...created, data: { ...created.data, messageId: 'msg-1' } },
+    ])
+    expect(state.nodes.filter(item => item.id === LEAD_A)).toHaveLength(1)
+    expect(state.delegations.find(item => item.nodeId === LEAD_A)?.messageId).toBe('msg-1')
+    expect(failure([
+      ...throughAwaiting(),
+      approval('approved'),
+      taskAssigned(TASK_A),
+      phase('task_implementation'),
+      created,
+      created,
+    ])).toMatch(/node already exists/)
+  })
+
   it('does not depend on team events', () => {
     const source = ['../src/projection.ts', '../src/types.ts', '../src/index.ts', '../package.json']
       .map(file => readFileSync(new URL(file, import.meta.url), 'utf8'))

@@ -556,6 +556,8 @@ export class OrcService extends Service {
     }
     const refused = applyOrc(state, event)
     if (refused.failure !== undefined) throw new OrcError(refused.failure)
+    // The child reads its role from this log while its system section is assembled.
+    await this.commit(session, event)
     try {
       const started = await this.ctx.subagents.startContinuable({
         provider: route.subagentProvider,
@@ -1139,35 +1141,39 @@ export class OrcService extends Service {
       watched.admit()
       const decision = await watched.done
       if (decision === undefined) return { failed: `lead ${String(leadId)} did not report a fix after ${messageId}` }
-      await this.leadFinishNotice(caller, String(leadId))
+      const afterSeq = caller.session.snapshotEvents().at(-1)?.seq ?? -1
+      await this.leadFinishNotice(caller, afterSeq, decision, signal)
       return { decision, assigneeNodeId: leadId }
     }
   }
 
   /**
-   * Let the Lead's background-finished notice reach the caller log before later fix events.
-   * Absent notices stop after a short bound so a Lead that does not park still records the fix.
+   * Wait until this fix turn's settlement notice is on the caller log.
+   * An older notice for the same Lead, including one whose text says the Lead finished, does not count.
+   * The notice's last text block is the Lead's closing text and must be this decision.
    */
-  private async leadFinishNotice(caller: Agent, leadId: string): Promise<void> {
-    const needle = `Background subagent ${leadId} finished`
-    const deadline = Date.now() + 500
-    while (Date.now() < deadline) {
-      const seen = caller.session.snapshotEvents().some((event) => {
-        if (event.type !== 'agent/inbox/spliced') return false
-        const inserted = (event.data as { inserted?: unknown }).inserted
-        if (!Array.isArray(inserted)) return false
-        return inserted.some((message) => {
-          const content = (message as { content?: unknown }).content
-          if (!Array.isArray(content)) return false
-          return content.some((part) => {
-            const text = (part as { text?: unknown }).text
-            return (part as { type?: unknown }).type === 'text' && typeof text === 'string' && text.includes(needle)
-          })
-        })
+  private leadFinishNotice(caller: Agent, afterSeq: number, decision: string, signal: AbortSignal): Promise<void> {
+    const matches = (event: SessionEvent): boolean => {
+      if (event.type !== 'agent/inbox/spliced' || event.seq <= afterSeq) return false
+      return event.data.inserted.some((message) => {
+        const texts = message.content.flatMap(block => block.type === 'text' ? [block.text] : [])
+        return texts.at(-1) === decision
       })
-      if (seen) return
-      await new Promise((resolve) => { setTimeout(resolve, 5) })
     }
+    if (caller.session.snapshotEvents().some(matches)) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const stop = this.ctx.on('session/event', (session, event) => {
+        if (session !== caller.session || !matches(event)) return
+        stop()
+        resolve()
+      })
+      const onAbort = (): void => {
+        stop()
+        reject(new Error('fix aborted'))
+      }
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    })
   }
 
   /**

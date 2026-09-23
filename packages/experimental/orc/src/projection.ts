@@ -498,12 +498,39 @@ function createWorkflow(state: OrcState, event: Extract<OrcEvent, { type: 'orc/w
   }
 }
 
+/** Fill `messageId` on the open delegation. A second row must not add or replace the node. */
+function rememberMessageId(
+  state: OrcState,
+  existing: OrcNode,
+  data: Extract<OrcEvent, { type: 'orc/node/created' }>['data'],
+): OrcState {
+  const messageId = data.messageId
+  const delegation = state.delegations.find(item => item.correlationId === data.correlationId && item.nodeId === data.nodeId)
+  if (
+    messageId === undefined
+    || delegation === undefined
+    || delegation.messageId !== undefined
+    || existing.parentId !== data.parentId
+    || existing.role !== data.role
+    || existing.taskId !== data.taskId
+    || existing.correlationId !== data.correlationId
+  ) return refuse(state, 'node already exists')
+  return {
+    ...state,
+    delegations: state.delegations.map(item =>
+      item.correlationId === data.correlationId && item.nodeId === data.nodeId
+        ? { ...item, messageId }
+        : item),
+  }
+}
+
 /** Create a Lead or Peer when the parent edge and task phase are legal. */
 function createNode(state: OrcState, event: Extract<OrcEvent, { type: 'orc/node/created' }>): OrcState {
   const data = event.data
   const invalid = requireMutableRun(state, data.runId)
   if (invalid !== undefined) return invalid
-  if (state.nodes.some(node => node.id === data.nodeId)) return refuse(state, 'node already exists')
+  const existing = state.nodes.find(node => node.id === data.nodeId)
+  if (existing !== undefined) return rememberMessageId(state, existing, data)
   const parent = state.nodes.find(node => node.id === data.parentId)
   if (parent === undefined) return refuse(state, 'parent node is missing')
   if (parent.role === 'peer') return refuse(state, 'peer cannot spawn a child')
