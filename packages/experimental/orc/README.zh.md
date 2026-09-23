@@ -33,6 +33,8 @@ Codex 启动被持久化之后，`settleCodexRun` 读取这次一次性运行的
 
 每个 `orc/phase`、`orc/run/completed` 与 `orc/run/failed` 事件都写出 `actorNodeId`。缺少行动者会被拒绝，Peer 不能推进工作流。Lead 只能走任务内的边：实现、Peer 结算、review、audit 与修复。任务排序、最终审查与终态完成只属于 Supervisor。阻断性的分支发现项写出其任务 id。Supervisor 把该任务移回 `task_fix`，并在回到 review 之前由 `orc/fix/iteration` 记录下一次迭代。一次 `final_review` 只接受一对分支 review 与 audit；仅当最近一次结果为 failed、malformed 或 unavailable 时才允许重试。修复循环返回之后的下一次访问只按那一对新结果判断。缺失或畸形的分支结果仍然阻止完成，并且不算干净。`low` 与 `info` 发现项不阻断，除非该次运行把它们列入 `blockingSeverities`。
 
+发现的身份包含 id、来源阶段、审查范围和所属任务。后续报告会更新同一身份的发现；不同阶段、范围或任务中的发现即使使用相同 id，也会独立保留。同一报告内的重复 id 会被拒绝。修复请求只包含与选定报告关联的阻断发现。
+
 Spec 与 plan 解析会在记录或返回文档文本之前去除首尾空白，保留内部格式和原始 JSON 信封，并拒绝仅含空白的文档。
 
 事件名与载荷版本保持为版本 1。本包不迁移、改写或删除已发布的会话数据，也不导入 `team/*` 事件。

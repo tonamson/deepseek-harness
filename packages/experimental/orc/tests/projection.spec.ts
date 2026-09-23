@@ -313,6 +313,34 @@ function throughTaskReview(blocking: readonly OrcSeverity[] = BLOCKING, secondTa
 }
 
 describe('ORC finding identity', () => {
+  it('keeps the same id separate across tasks and inferred report stages', () => {
+    const state = replay([
+      ...throughTaskReview(),
+      reportRequested('review', 'rev-a', 'task', 0, TASK_A),
+      reportResult('review', 'rev-a', 'ok', [{ id: 'shared', severity: 'low', summary: 'review a' }]),
+      phase('task_audit'),
+      reportRequested('audit', 'aud-a', 'task', 0, TASK_A),
+      reportResult('audit', 'aud-a', 'ok', [{ id: 'shared', severity: 'low', summary: 'audit a' }]),
+      phase('next_task'),
+      phase('task_implementation'),
+      node('lead', OrcNodeId('lead-b'), SUPERVISOR, TASK_B, 'corr-lead-b'),
+      taskStarted(TASK_B, OrcNodeId('lead-b')),
+      node('peer', OrcNodeId('peer-b'), OrcNodeId('lead-b'), TASK_B, 'corr-peer-b'),
+      nodeSettled(OrcNodeId('peer-b'), 'settled', 'peer b'),
+      phase('task_peer_settlement'),
+      nodeSettled(OrcNodeId('lead-b'), 'settled', 'lead b'),
+      taskSettled(TASK_B, OrcNodeId('lead-b')),
+      phase('task_review'),
+      reportRequested('review', 'rev-b', 'task', 0, TASK_B),
+      reportResult('review', 'rev-b', 'ok', [{ id: 'shared', severity: 'low', summary: 'review b' }]),
+    ])
+    expect(state.findings.map(item => [item.summary, item.taskId, item.correlationId])).toEqual([
+      ['review a', TASK_A, OrcCorrelationId('rev-a')],
+      ['audit a', TASK_A, OrcCorrelationId('aud-a')],
+      ['review b', TASK_B, OrcCorrelationId('rev-b')],
+    ])
+  })
+
   it('reopens the same finding id on a later review and still refuses it twice in one report', () => {
     const repeated = replay([
       ...throughTaskReview(BLOCKING, false),

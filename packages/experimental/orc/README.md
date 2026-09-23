@@ -33,6 +33,8 @@ The workflow phases are `brainstorming`, `spec_required`, `plan_required`, `awai
 
 Every `orc/phase`, `orc/run/completed`, and `orc/run/failed` event names `actorNodeId`. A missing actor is refused, and a Peer cannot advance the workflow. A Lead may take only the task-local edges: implementation, peer settlement, review, audit, and fix. Sequencing, final review, and terminal completion stay with the Supervisor. A blocking branch finding names its task id. The Supervisor moves that task to `task_fix`, and `orc/fix/iteration` records the next iteration before review. One final-review visit accepts one branch review and one branch audit, plus a retry only when the latest result is failed, malformed, or unavailable. A later visit, after that fix loop returns, is judged on its own pair. A missing or malformed branch result still blocks completion and is not clean. Low and info findings do not block unless the run lists them in `blockingSeverities`.
 
+Finding identity includes the id, source stage, review scope, and owning task. A later report updates that lineage; another stage, scope, or task keeps a separate finding even when it uses the same id. Duplicate ids within one report are refused. Fix requests include only blocking findings correlated with the selected reports.
+
 Spec and plan parsing removes surrounding whitespace from the document text before it is logged or returned, preserves internal formatting and the raw JSON envelope, and rejects whitespace-only documents.
 
 Event names and payload version stay at version 1. This package does not migrate, rewrite, or delete released session data, and it does not import `team/*` events.

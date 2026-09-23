@@ -2401,7 +2401,7 @@ Open the ORC workflow on this agent. Does not approve a plan or start implementa
     },
     "blocking_severities": {
       "type": "array",
-      "description": "Severities that block progress. The service rejects a set that omits critical, high, and medium.",
+      "description": "Must equal the configured blocking severities. A different set is refused. Config pins the set, including whether low or info block.",
       "items": {
         "type": "string",
         "enum": [
@@ -2647,7 +2647,7 @@ Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental
 
 ### `orc_request_spec_plan`
 
-Start the next Codex spec or plan run. This is the only transition into spec_required or plan_required. Only the Supervisor may call this.
+Run the next Codex spec or plan and wait for it. Returns the status and the normalized spec or plan text. This is the only transition into spec_required or plan_required. Only the Supervisor may call this.
 
 ```json
 {
@@ -2668,7 +2668,7 @@ Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental
 
 ### `orc_run_final_gates`
 
-Run branch review and branch audit. A blocking finding is sent to that task Lead. Only the Supervisor may call this.
+Run branch review and branch audit. A blocking finding is sent to that task Lead. When both branch reports are ok and non-blocking, record orc/run/completed. Only the Supervisor may call this.
 
 ```json
 {

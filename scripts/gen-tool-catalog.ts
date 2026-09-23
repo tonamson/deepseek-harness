@@ -649,6 +649,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
         planOutputSchema: 'codex-plan',
         reviewOutputSchema: 'codex-review',
         auditOutputSchema: 'codex-audit',
+        blockingSeverities: ['critical', 'high', 'medium'],
       })
       const session = ctx.sessions.create(SessionId('tool-catalog-orc'))
       let agent!: Agent

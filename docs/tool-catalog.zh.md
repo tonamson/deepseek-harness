@@ -2408,7 +2408,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
     },
     "blocking_severities": {
       "type": "array",
-      "description": "Severities that block progress. The service rejects a set that omits critical, high, and medium.",
+      "description": "Must equal the configured blocking severities. A different set is refused. Config pins the set, including whether low or info block.",
       "items": {
         "type": "string",
         "enum": [
@@ -2654,7 +2654,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `orc_request_spec_plan`
 
-启动下一次 Codex spec 或 plan 运行。这是进入 spec_required 或 plan_required 的唯一转换。只有 Supervisor 可以调用。
+运行下一次 Codex spec 或 plan 并等待完成。返回状态及规范化后的 spec 或 plan 文本。这是进入 spec_required 或 plan_required 的唯一转换。只有 Supervisor 可以调用。
 
 ```json
 {
@@ -2675,7 +2675,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `orc_run_final_gates`
 
-运行分支 review 和分支 audit。阻断发现会发给该任务的 Lead。只有 Supervisor 可以调用。
+运行分支 review 和分支 audit。阻断发现会发给该任务的 Lead。当两份分支报告均为 ok 且不阻断时，记录 orc/run/completed。只有 Supervisor 可以调用。
 
 ```json
 {

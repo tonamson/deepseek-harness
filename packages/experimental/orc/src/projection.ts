@@ -879,7 +879,7 @@ function recordReport(
   if (delegation.status !== 'open') return refuse(state, 'delegation is already settled')
   const seen = new Set<string>()
   for (const finding of data.findings) {
-    // The same id in one report is a bad document. The same id on a later report reopens that finding.
+    // Duplicate ids are invalid within a report; later reports can update the same lineage.
     if (seen.has(finding.id)) return refuse(state, 'duplicate finding id')
     seen.add(finding.id)
     if (finding.taskId !== undefined && delegation.scope === 'task' && finding.taskId !== delegation.taskId) {
@@ -914,11 +914,17 @@ function recordReport(
       ...(finding.sourceStage === undefined ? {} : { sourceStage: finding.sourceStage }),
     }
   })
-  const incoming = new Map(storedFindings.map(finding => [finding.id, finding]))
-  const findings = state.findings.map(existing => incoming.get(existing.id) ?? existing)
-  const present = new Set(state.findings.map(finding => finding.id))
+  const lineageKey = (finding: OrcState['findings'][number]): string => JSON.stringify([
+    finding.id,
+    finding.sourceStage ?? delegationByCorrelation(state, finding.correlationId)?.kind,
+    finding.scope,
+    finding.taskId,
+  ])
+  const incoming = new Map(storedFindings.map(finding => [lineageKey(finding), finding]))
+  const findings = state.findings.map(existing => incoming.get(lineageKey(existing)) ?? existing)
+  const present = new Set(state.findings.map(lineageKey))
   for (const finding of storedFindings) {
-    if (!present.has(finding.id)) findings.push(finding)
+    if (!present.has(lineageKey(finding))) findings.push(finding)
   }
   return {
     ...state,

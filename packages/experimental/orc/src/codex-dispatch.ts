@@ -433,8 +433,10 @@ function loggedTaskId(data: unknown): OrcTaskId | undefined {
 
 /** Findings on these reports whose severity is in the run's blocking set. */
 function blockingFindings(state: OrcState, reports: readonly OrcDelegation[]): OrcFinding[] {
-  const ids = new Set(reports.flatMap(report => report.findingIds))
-  return state.findings.filter(finding => ids.has(finding.id) && state.blockingSeverities.includes(finding.severity))
+  return state.findings.filter(finding => state.blockingSeverities.includes(finding.severity)
+    && reports.some(report => report.correlationId === finding.correlationId
+      && (finding.sourceStage === undefined || finding.sourceStage === report.kind)
+      && report.findingIds.includes(finding.id)))
 }
 
 /** Current status, or `open` when the row is missing. */

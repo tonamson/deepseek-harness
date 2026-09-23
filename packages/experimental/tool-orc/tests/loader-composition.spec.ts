@@ -659,7 +659,10 @@ describe('ORC plan approval and fix loop', () => {
       })],
     })
     harness.fake.queue.push(Promise.resolve(codexText('codex-review', { stage: 'codex-review', findings: [finding] })))
-    harness.fake.queue.push(Promise.resolve(codexText('codex-audit', { stage: 'codex-audit', findings: [] })))
+    harness.fake.queue.push(Promise.resolve(codexText('codex-audit', {
+      stage: 'codex-audit',
+      findings: [{ ...finding, severity: 'low', sourceStage: 'codex-audit', evidence: 'audit-only evidence', remediation: 'audit-only remediation' }],
+    })))
     harness.fake.queue.push(Promise.resolve(codexText('codex-review', { stage: 'codex-review', findings: [] })))
     harness.fake.queue.push(Promise.resolve(codexText('codex-audit', { stage: 'codex-audit', findings: [] })))
     const gated = await harness.orc.runTaskLoop(harness.supervisor, SIGNAL)
@@ -670,6 +673,8 @@ describe('ORC plan approval and fix loop', () => {
     expect(harness.fake.sent[0]?.text).toContain('location: src/a.ts:3')
     expect(harness.fake.sent[0]?.text).toContain('evidence: null')
     expect(harness.fake.sent[0]?.text).toContain('remediation: check')
+    expect(harness.fake.sent[0]?.text).not.toContain('audit-only')
+    expect(gated.findings).toHaveLength(2)
     expect(gated.tasks[0]?.fixDecision).toBe(`fixed ${String(leadLaunch.nodeId)}`)
     expect(gated.tasks[0]?.fixDecision).not.toBe('stale reply')
     const noticeRows = plainEvents(harness.supervisor.session).flatMap((event) => {
@@ -695,7 +700,7 @@ describe('ORC plan approval and fix loop', () => {
 
     harness.fake.queue.push(Promise.resolve(codexText('codex-review', {
       stage: 'codex-review',
-      findings: [{ ...finding, id: 'finding-branch', sourceStage: 'codex-review', summary: 'branch drift' }],
+      findings: [{ ...finding, sourceStage: 'codex-review', summary: 'branch drift', evidence: 'branch-only evidence' }],
     })))
     harness.fake.queue.push(Promise.resolve(codexText('codex-audit', { stage: 'codex-audit', findings: [] })))
     harness.fake.queue.push(Promise.resolve(codexText('codex-review', { stage: 'codex-review', findings: [] })))
@@ -705,6 +710,8 @@ describe('ORC plan approval and fix loop', () => {
     const finalState = await harness.orc.runFinalLoop(harness.supervisor, SIGNAL)
     expect(harness.fake.sent.length).toBeGreaterThan(1)
     expect(harness.fake.sent.at(-1)?.text).toContain('branch drift')
+    expect(harness.fake.sent.at(-1)?.text).toContain('branch-only evidence')
+    expect(harness.fake.sent.at(-1)?.text).not.toContain('missing null check')
     expect(finalState.phase).toBe('final_review')
     const finished = await harness.ctx.tools.execute({
       callId: ToolCallId('call-complete'),
