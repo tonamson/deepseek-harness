@@ -64,7 +64,7 @@ vi.mock('node:fs', async (importOriginal) => {
 
 type JsonObject = Record<string, unknown>
 
-const CODEX_VERSION = '0.153.4'
+const CODEX_VERSION = '0.155.1'
 const CODEX_PLATFORM_PACKAGES = [
   '@openai/codex-darwin-arm64',
   '@openai/codex-darwin-x64',
@@ -406,10 +406,35 @@ describe('task admission and package contracts', () => {
     const rows = Array.isArray(parsed)
       ? (parsed as Array<{ insert?: Array<{ id?: string; name?: string }> }>).flatMap(entry => entry.insert ?? [])
       : []
-    expect(rows).toEqual([{
-      id: 'subagent-codex',
-      name: '@deepseek-ai/dsh-subagent-codex',
-    }])
+    expect(rows).toEqual([
+      {
+        id: 'subagent-codex-review',
+        name: '@deepseek-ai/dsh-subagent-codex',
+        config: {
+          providerName: 'codex-review',
+          model: 'gpt-5.6-luna',
+          reasoningEffort: 'high',
+        },
+      },
+      {
+        id: 'subagent-codex-audit',
+        name: '@deepseek-ai/dsh-subagent-codex',
+        config: {
+          providerName: 'codex-audit',
+          model: 'gpt-5.6-luna',
+          reasoningEffort: 'xhigh',
+        },
+      },
+      {
+        id: 'subagent-codex-spec',
+        name: '@deepseek-ai/dsh-subagent-codex',
+        config: {
+          providerName: 'codex-spec',
+          model: 'gpt-5.6-terra',
+          reasoningEffort: 'high',
+        },
+      },
+    ])
     expect(JSON.stringify(rows)).not.toContain('tool-subagent')
   })
 
@@ -683,6 +708,32 @@ describe('task admission and package contracts', () => {
       ephemeral: true,
       model: 'codex-explicit-model',
       approvalPolicy: 'never',
+    })
+    child.peer.respond(threadStart, { thread: { id: 'thread-1', ephemeral: true } })
+    await starting
+    wire.close()
+  })
+
+  it('sends the configured reasoning effort through thread configuration', async () => {
+    const child = fakeChild()
+    const wire = new CodexAppServerWire(
+      child.handle.stdout!,
+      child.handle.stdin!,
+      'never',
+      'gpt-5.6-luna',
+      'xhigh',
+    )
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.155.1' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+    const starting = wire.startThread('/workspace', new AbortController().signal)
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toMatchObject({
+      model: 'gpt-5.6-luna',
+      config: { model_reasoning_effort: 'xhigh' },
     })
     child.peer.respond(threadStart, { thread: { id: 'thread-1', ephemeral: true } })
     await starting

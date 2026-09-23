@@ -45,6 +45,7 @@
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。 |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
 | `@deepseek-ai/dsh-experimental-tool-agent-team` | `interrupt_agent`、`list_agents`、`send_message`、`spawn_teammate`、`team_task_create`、`team_task_get`、`team_task_list`、`team_task_update`、`wait_agent` | `ctx.tools`、`ctx.systemPrompt`、`ctx.agentTeams`、`an exact live Team member Agent` | `tool/call`、`team/member`、`team/message/queued`、`team/message/delivered`、`team/task`、`tool/result` | - | 这 9 个工具限定于隐式 Team Lead 与持久 teammate 作用域。随产品发布的 dsh-base bundle 默认禁用该包；文档中的 Agent Teams profile patch 会启用它，并禁用旧 continuable child 的同名控制工具。 |
+| `@deepseek-ai/dsh-experimental-tool-orc` | `orc_advance`、`orc_assign_task`、`orc_create_workflow`、`orc_fail`、`orc_record_fix`、`orc_record_result`、`orc_request_audit`、`orc_request_review`、`orc_request_spec_plan`、`orc_run_final_gates`、`orc_run_task_gates`、`orc_settle_task`、`orc_spawn`、`orc_start_task` | `ctx.tools`、`ctx.systemPrompt`、`ctx.orc`、`a calling Agent` | `tool/call`、`tool/result`、`orc/workflow/created`、`orc/spec/requested`、`orc/plan/requested`、`orc/plan/approval`、`orc/node/created`、`orc/task/assigned`、`orc/review/requested`、`orc/audit/requested`、`orc/fix/iteration` | - | 全部 ORC 工具都限定在调用方 agent 的作用域。已发布的 profile 不启用它们。`@deepseek-ai/dsh-experimental-orc-profile` 挂载该服务和本包。`plan/review` 由 plan mode 追加，不是这些工具追加的。 |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
@@ -2304,6 +2305,514 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 这 10 个工具限定于隐式 Team Lead 与持久 teammate 作用域。随产品发布的 dsh-base bundle 默认禁用该包；文档中的 Agent Teams profile patch 会启用它，并禁用旧 continuable child 的同名控制工具。
 
+
+<a id="deepseek-aidsh-experimental-tool-orc"></a>
+
+## `@deepseek-ai/dsh-experimental-tool-orc`
+
+### `orc_advance`
+
+推进工作流。Peer 不能推进。Lead 不能走 Supervisor 的边，也不能点名另一个任务。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "to": {
+      "type": "string",
+      "description": "Requested phase.",
+      "enum": [
+        "brainstorming",
+        "spec_required",
+        "plan_required",
+        "awaiting_user_approval",
+        "task_implementation",
+        "task_peer_settlement",
+        "task_review",
+        "task_audit",
+        "task_fix",
+        "next_task",
+        "final_review",
+        "complete",
+        "failed"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task id when the edge names one."
+    }
+  },
+  "required": [
+    "to"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_assign_task`
+
+分配一个实现任务。只有 Supervisor 可以调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Stable task id."
+    },
+    "write_scope": {
+      "type": "array",
+      "description": "Paths this task may write.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "description": "How this task is accepted."
+    }
+  },
+  "required": [
+    "task_id",
+    "write_scope",
+    "acceptance_criteria"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_create_workflow`
+
+在此 agent 上打开 ORC 工作流。不会批准计划，也不会开始实现。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "responsibility": {
+      "type": "string",
+      "description": "Brainstorm or task context recorded in the Supervisor prompt."
+    },
+    "write_scope": {
+      "type": "array",
+      "description": "Repository paths the run may write.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "description": "How the run is accepted."
+    },
+    "reporting_format": {
+      "type": "string",
+      "description": "How children report results."
+    },
+    "blocking_severities": {
+      "type": "array",
+      "description": "Must equal the configured blocking severities. A different set is refused. Config pins the set, including whether low or info block.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "info"
+        ]
+      }
+    }
+  },
+  "required": [
+    "responsibility",
+    "write_scope",
+    "acceptance_criteria",
+    "reporting_format",
+    "blocking_severities"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_fail`
+
+记录终态失败。服务只接受 Supervisor 作为行动者。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "reason": {
+      "type": "string",
+      "description": "Durable failure text."
+    }
+  },
+  "required": [
+    "reason"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_record_fix`
+
+记录当前任务的修复决定。Peer 不能调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Task id."
+    },
+    "iteration": {
+      "type": "integer",
+      "description": "Next fix iteration."
+    },
+    "decision": {
+      "type": "string",
+      "description": "Fix decision text."
+    },
+    "assignee_node_id": {
+      "type": "string",
+      "description": "Optional node assigned the fix."
+    }
+  },
+  "required": [
+    "task_id",
+    "iteration",
+    "decision"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_record_result`
+
+记录一个 DeepSeek 节点结果。Peer 只能记录自己的运行。Lead 可以记录自己或自己的子节点。不接受 Codex 结果。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "correlation_id": {
+      "type": "string",
+      "description": "Delegation correlation id."
+    },
+    "stage": {
+      "type": "string",
+      "description": "Delegated stage.",
+      "enum": [
+        "codex-spec",
+        "codex-plan",
+        "codex-review",
+        "codex-audit",
+        "deepseek-node"
+      ]
+    },
+    "delegation_role": {
+      "type": "string",
+      "description": "Role stored on the delegation."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task id when the delegation has one."
+    },
+    "status": {
+      "type": "string",
+      "description": "Codex report status.",
+      "enum": [
+        "ok",
+        "failed",
+        "malformed",
+        "unavailable"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "description": "Spec or plan text."
+    },
+    "outcome": {
+      "type": "string",
+      "description": "DeepSeek node outcome.",
+      "enum": [
+        "settled",
+        "failed",
+        "timeout",
+        "cancelled",
+        "incomplete"
+      ]
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Evidence for a node outcome."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Review or audit findings. Do not treat a missing result as an empty list.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "summary"
+        ]
+      }
+    }
+  },
+  "required": [
+    "correlation_id",
+    "stage",
+    "delegation_role"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_request_audit`
+
+打开一次 Codex audit。audit 不包含 review。只有 Supervisor 可以调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "description": "Task review or final branch review.",
+      "enum": [
+        "task",
+        "branch"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Active task id. Omit for a branch run."
+    }
+  },
+  "required": [
+    "scope"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_request_review`
+
+打开一次 Codex review。review 不包含 audit。只有 Supervisor 可以调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "description": "Task review or final branch review.",
+      "enum": [
+        "task",
+        "branch"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Active task id. Omit for a branch run."
+    }
+  },
+  "required": [
+    "scope"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_request_spec_plan`
+
+运行下一次 Codex spec 或 plan 并等待完成。返回状态及规范化后的 spec 或 plan 文本。这是进入 spec_required 或 plan_required 的唯一转换。只有 Supervisor 可以调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "context_ref": {
+      "type": "string",
+      "description": "Completed brainstorm or context reference. Prompt text cannot replace this argument."
+    }
+  },
+  "required": [
+    "context_ref"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_run_final_gates`
+
+运行分支 review 和分支 audit。阻断发现会发给该任务的 Lead。当两份分支报告均为 ok 且不阻断时，记录 orc/run/completed。只有 Supervisor 可以调用。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_run_task_gates`
+
+运行任务 review、任务 audit 和现有 Lead 的修复，直到两道门都干净或某个结果阻断。只有 Supervisor 可以调用。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_settle_task`
+
+记录该任务的 Lead 结算。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Task id."
+    },
+    "lead_node_id": {
+      "type": "string",
+      "description": "Lead node id. A Lead caller may omit it. A Peer cannot name another Lead."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Settlement evidence."
+    }
+  },
+  "required": [
+    "task_id",
+    "evidence"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_spawn`
+
+为一个任务创建一个 Lead 或 Peer。服务只允许 Supervisor 到 Lead，以及 Lead 到 Peer。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "description": "Child role.",
+      "enum": [
+        "lead",
+        "peer"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task the child works on."
+    },
+    "responsibility": {
+      "type": "string",
+      "description": "Bounded responsibility recorded in the child prompt."
+    },
+    "write_scope": {
+      "type": "array",
+      "description": "Paths the child may write.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "description": "How the child is accepted."
+    },
+    "reporting_format": {
+      "type": "string",
+      "description": "How the child reports evidence."
+    }
+  },
+  "required": [
+    "role",
+    "task_id",
+    "responsibility",
+    "write_scope",
+    "acceptance_criteria",
+    "reporting_format"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_start_task`
+
+记录被点名的 Lead 已开始该任务。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Task id."
+    },
+    "lead_node_id": {
+      "type": "string",
+      "description": "Lead node id. A Lead caller may omit it. A Peer cannot name another Lead."
+    }
+  },
+  "required": [
+    "task_id"
+  ]
+}
+```
+
+来源：[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+全部 ORC 工具都限定在调用方 agent 的作用域。已发布的 profile 不启用它们。`@deepseek-ai/dsh-experimental-orc-profile` 挂载该服务和本包。`plan/review` 由 plan mode 追加，不是这些工具追加的。
 
 <a id="deepseek-aidsh-tool-todo"></a>
 

@@ -82,7 +82,7 @@ agent 完成计划后，会以 markdown 形式、从标题开头书写计划并�
 
 ### 持久状态与步骤边界追加
 
-本包持久化一条仅记日志、整值替换的事件 `plan/mode`，最后一条已记录值即为状态。没有轮次开启时，模式变更会立即追加；轮次开启期间，它保持待生效，直到下一个被接受的轮内 pre-step——agent 运行时唯一的追加点——且追加失败不能阻塞轮次。`set`/`get` 服务方法及其确切返回状态见 [`src/index.ts`](src/index.ts)，并读取已注册的 `plan` 投影；注册表或 key 缺失时，第一次依赖它们的访问会显式失败。
+本包持久化一条仅记日志、整值替换的事件 `plan/mode`，最后一条已记录值即为状态。`exit_plan_mode` 还会追加一条仅记日志的 `plan/review`，含 `version: 1`、工具调用 `correlation`，以及 `approved`、`rejected` 或 `dismissed`。`/plan off` 和评审期间的服务重载不会追加 `plan/review`。`plan/mode` 变为 inactive 不是该决定。没有轮次开启时，模式变更会立即追加；轮次开启期间，它保持待生效，直到下一个被接受的轮内 pre-step——agent 运行时唯一的追加点——且追加失败不能阻塞轮次。`set`/`get` 服务方法及其确切返回状态见 [`src/index.ts`](src/index.ts)，并读取已注册的 `plan` 投影；注册表或 key 缺失时，第一次依赖它们的访问会显式失败。
 
 ### `/plan` 命令
 

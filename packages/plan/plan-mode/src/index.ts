@@ -51,6 +51,17 @@ declare module '@deepseek-ai/dsh-session/types' {
      * inactive through the projection unit's fold.
      */
     'plan/mode': { active: boolean }
+    /**
+     * One user answer from `exit_plan_mode`. Log-only, not a mode flag.
+     * `correlation` is the tool call that presented the plan. `approved` is the
+     * Approve option, `rejected` is any other answer, and `dismissed` is a
+     * cancelled review. `/plan off` does not append this event.
+     */
+    'plan/review': {
+      version: 1
+      correlation: string
+      decision: 'approved' | 'rejected' | 'dismissed'
+    }
   }
 }
 
@@ -329,6 +340,7 @@ export class PlanModeController extends Service {
           // never called. An abort (turn cancel, provider teardown) keeps its
           // own message — there is no user to wait for.
           if (cause instanceof UserQuestionError && cause.code === 'ASK_CANCELLED') {
+            this.appendReview(agent.session, exec.callId, 'dismissed')
             throw new Error('The user dismissed the plan review to speak instead; '
               + 'stay in plan mode, stop here, and wait for their message.')
           }
@@ -343,13 +355,16 @@ export class PlanModeController extends Service {
         const item = reviewItems.length === 1 ? reviewItems[0] : undefined
         if (item?.selected.length !== 1 || item.selected[0] !== APPROVE_LABEL || item.custom !== undefined) {
           const feedback = item?.custom ?? ''
+          this.appendReview(agent.session, exec.callId, 'rejected')
           throw new Error(feedback === ''
             ? 'The user chose to keep planning; revise the plan and present it again.'
             : `The user chose to keep planning; their feedback: ${feedback}`)
         }
         // Keep plan guidance for the rest of this assistant tool batch. The
         // silent selection is appended at the next accepted in-turn pre-step,
-        // before its request assembly.
+        // before its request assembly. The review event is the user decision;
+        // the later plan/mode append is only the mode flag.
+        this.appendReview(agent.session, exec.callId, 'approved')
         this.pendingIntents.set(agent.session, { active: false, narrate: false })
         return { approved: true }
       },
@@ -365,6 +380,11 @@ export class PlanModeController extends Service {
         content: result.content,
       }),
     }))
+  }
+
+  /** Append the user review. A failed append leaves the tool unsuccessful. */
+  private appendReview(session: Session, correlation: string, decision: 'approved' | 'rejected' | 'dismissed'): void {
+    session.append('plan/review', { version: 1, correlation, decision })
   }
 
   private loggedActive(session: Session): boolean {

@@ -932,6 +932,21 @@ export interface InspectorOptions {
 
 来源： [`packages/experimental/inspector/src/index.ts:66`](../packages/experimental/inspector/src/index.ts)
 
+<a id="deepseek-aidsh-experimental-orc"></a>
+
+## `@deepseek-ai/dsh-experimental-orc`
+
+需要：`agents` · `sessions` · `sessionPersistence` · `sessionProjections` · `subagents`
+
+```ts config-catalog
+/** Validated deployment routes. Execution copies these fields and does not invent models. */
+export type OrcServiceConfig = z.infer<typeof configSchema>
+```
+
+Depends on: `z` (`zod`)
+
+来源：[`packages/experimental/orc/src/index.ts:101`](../packages/experimental/orc/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-ptc-runtime-python"></a>
 
 ## `@deepseek-ai/dsh-experimental-ptc-runtime-python`
@@ -1772,6 +1787,12 @@ export interface PiAiCompatProfile {
   allowEmptySignature?: boolean
   /** Whether the endpoint accepts Anthropic strict tool schemas; `anthropic-messages`. */
   supportsStrictTools?: boolean
+  /**
+   * Whether the exact model accepts a system message after the conversation has
+   * started; `false` folds later system messages into the leading one.
+   * `mistral-conversations`.
+   */
+  supportsMidConvoSystemMessages?: boolean
 }
 
 /** One request modality a pi-ai model may accept. */
@@ -2158,7 +2179,7 @@ export interface PlanModeConfig {
 }
 ```
 
-来源： [`packages/plan/plan-mode/src/index.ts:70`](../packages/plan/plan-mode/src/index.ts)
+来源：[`packages/plan/plan-mode/src/index.ts:81`](../packages/plan/plan-mode/src/index.ts)
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -3047,6 +3068,8 @@ export interface Config {
   providerName?: string
   /** Native Codex model fixed for this instance; omitted to inherit Codex settings. */
   model?: string
+  /** Native Codex reasoning effort fixed for this instance; omitted to inherit Codex settings. */
+  reasoningEffort?: string
   /**
    * Explicit environment entries layered over the subprocess seam's
    * credential-scrubbed parent environment.
@@ -3138,6 +3161,41 @@ export interface Config {
 ```
 
 来源： [`packages/subagent/subagent-fork-in-process/src/index.ts:31`](../packages/subagent/subagent-fork-in-process/src/index.ts)
+
+<a id="deepseek-aidsh-subagent-grok"></a>
+
+## `@deepseek-ai/dsh-subagent-grok`
+
+需要：`subagents` · `subprocess`
+
+```ts config-catalog
+/** Deployment-owned Grok executable, model, permission, and process settings. */
+export interface Config {
+  /** Provider name on `ctx.subagents` (default `grok`). */
+  providerName?: string
+  /** Bare executable or absolute path resolved in the subprocess execution world. */
+  command?: string
+  /** Native Grok model fixed for this provider instance; omitted to inherit Grok settings. */
+  model?: string
+  /** Native Grok reasoning effort fixed for this provider instance; omitted to inherit Grok settings. */
+  reasoningEffort?: string
+  /** Explicit environment layered over the subprocess seam's credential scrub. */
+  env?: Record<string, string>
+  /** Native non-interactive Grok permission mode. */
+  permissionMode?: GrokPermissionMode
+  /** Wall-clock bound for version check and one delegated task. */
+  timeoutMs?: number
+  /** Grace in milliseconds between managed-range termination tiers. */
+  disposeGraceMs?: number
+  /** Maximum final stdout bytes retained for the parent Session. */
+  maxOutputBytes?: number
+}
+
+/** Native Grok permission mode accepted by a provider instance. */
+export type GrokPermissionMode = typeof GROK_PERMISSION_MODES[number]
+```
+
+来源：[`packages/subagent/subagent-grok/src/index.ts:39`](../packages/subagent/subagent-grok/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-spawn-in-process"></a>
 
@@ -3826,7 +3884,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-来源： [`packages/core/tools/src/index.ts:663`](../packages/core/tools/src/index.ts)
+来源：[`packages/core/tools/src/index.ts:674`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -4169,6 +4227,7 @@ export interface Config {
 - `@deepseek-ai/dsh-experimental-client-ui-agent-team`（[`packages/experimental/client-ui-agent-team/src/index.ts`](../packages/experimental/client-ui-agent-team/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-client-ui-voice-input`（[`packages/experimental/client-ui-voice-input/src/index.ts`](../packages/experimental/client-ui-voice-input/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-computer-use-cua-driver-native` — requires `computerUse` · `tools` · `systemPrompt`（[`packages/experimental/computer-use-cua-driver-native/src/index.ts`](../packages/experimental/computer-use-cua-driver-native/src/index.ts)）
+- `@deepseek-ai/dsh-experimental-tool-orc` — 需要 `agents` · `orc` · `tools` · `systemPrompt`（[`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)）
 - `@deepseek-ai/dsh-fs-observation-policy`（[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
 - `@deepseek-ai/dsh-fs-ssh` — 需要 `ssh` · `sandboxPolicy`（[`packages/ssh/fs-ssh/src/index.ts`](../packages/ssh/fs-ssh/src/index.ts)）
 - `@deepseek-ai/dsh-goal-round-driver` — 需要 `agents` · `goals` · `sessions`（[`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts)）
@@ -4241,6 +4300,7 @@ export interface Config {
 - `@deepseek-ai/dsh-deque`（[`packages/util/deque/src/index.ts`](../packages/util/deque/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-agent-team-profile`（[`packages/experimental/agent-team-profile/src/index.ts`](../packages/experimental/agent-team-profile/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-browser-use-runtime`（[`packages/experimental/browser-use-runtime/src/index.ts`](../packages/experimental/browser-use-runtime/src/index.ts)）
+- `@deepseek-ai/dsh-experimental-orc-profile`（[`packages/experimental/orc-profile/src/index.ts`](../packages/experimental/orc-profile/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-voice-input-bundle`（[`packages/experimental/voice-input-bundle/src/index.ts`](../packages/experimental/voice-input-bundle/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-webworker-packer`（[`packages/experimental/webworker-packer/src/index.ts`](../packages/experimental/webworker-packer/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-webworker-runtime`（[`packages/experimental/webworker-runtime/src/index.ts`](../packages/experimental/webworker-runtime/src/index.ts)）

@@ -719,7 +719,9 @@ function fixtureMessageIdReplacements(logs: readonly string[], fixtures: readonl
   const replacements = new Map<string, string>()
   for (const [fingerprint, fresh] of freshIds) {
     const existing = existingIds.get(fingerprint)
-    if (existing === undefined || fresh === existing) continue
+    // A committed token is assigned again by redaction. Copying it onto one
+    // field early splits that id from its other occurrences.
+    if (existing === undefined || fresh === existing || existing.startsWith('{{')) continue
     replacements.set(fresh, existing)
   }
   return replacements
@@ -1043,6 +1045,9 @@ function collectNormalizedStringMappings(
     || fresh === existing
     || excludedStrings.has(fresh)
     || excludedStrings.has(existing)
+    // Identity redaction owns committed tokens. Copying one onto a fresh uuid
+    // leaves the uuid's other fields in a different token class.
+    || (existing.startsWith('{{') && fresh !== existing)
   ) return true
   const freshKey = JSON.stringify([normalizedFresh, fresh])
   const existingKey = JSON.stringify([normalizedFresh, existing])

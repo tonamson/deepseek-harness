@@ -9,7 +9,7 @@ Agent presets are ordinary `@deepseek-ai/dsh-agent-preset` declarations carried 
 
 ## Where declarations live
 
-The shipped Web presets are `presets/<id>.patch.yml` files of the `@deepseek-ai/dsh-web-app` bundle, ids `standard`, `ptc`, `minimal` and `cordis`. Installed, the bundle resolves from the dsh installation, not the profile; querying `Config.listConfigs` with the `entry` id of any `preset-<id>` row it declares returns that `packageDir`. In a source checkout of DSH it is `packages/bundle/web-app/`. Read one file with the file-read tool when you need a template; `minimal.patch.yml` is the shortest. In Desktop the bundle sits inside `app.asar`, which shell commands cannot open. Load `cordis-composition-reference` for the patch dialect and the list of plugin packages a preset can mount.
+The shipped Web presets are declarations in the `presets/*.patch.yml` files of the `@deepseek-ai/dsh-web-app` bundle: `standard`, `my-coding`, `ptc`, `minimal` and `cordis`. `standard.patch.yml` contains both `standard` and `my-coding`. Installed, the bundle resolves from the dsh installation, not the profile; querying `Config.listConfigs` with the `entry` id of any `preset-<id>` row it declares returns that `packageDir`. In a source checkout of DSH it is `packages/bundle/web-app/`. Read one file with the file-read tool when you need a template; `minimal.patch.yml` is the shortest. In Desktop the bundle sits inside `app.asar`, which shell commands cannot open. Load `cordis-composition-reference` for the patch dialect and the list of plugin packages a preset can mount.
 
 A declaration row has these `config` fields: `id` (required, lowercase letters, digits and hyphens), `plugins` (required Cordis entry list), and optional `name`, `description` and `order` (roster position). The Loader row `id` is `preset-<id>` by convention.
 
@@ -82,3 +82,21 @@ A preset plugin that supplies a service must isolate the provider and all its co
 ## Extend the Host
 
 For new plugin code or profile-wide capabilities, load `cordis-plugin-development`, author a workspace bundle, and install it with `plugin_manager`. Inspect available APIs through `cordis_inspect_list` and `cordis_inspect_query`, including a mounted plugin's Config schema through the Host `Config` provider; those tools do not invoke Remote methods. Verify the installed capability before reporting completion.
+
+## Optional native subagents
+
+Codex, Claude Code, and Grok are independent optional Profile Bundles. Install only the requested provider with `plugin_manager` and restart the Profile before enabling its preset tool. The Host bundle registers the provider; a preset declaration grants its Agents access through a `@deepseek-ai/dsh-tool-subagent` child. Installing a provider alone grants no tool.
+
+The shipped full presets contain disabled `tool-subagent-codex`, `tool-subagent-claude-code`, and `tool-subagent-grok` entries. To enable Grok in a copied preset declaration, retain its other plugins and change the Grok entry to:
+
+```yaml
+- id: tool-subagent-grok
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: grok
+    toolName: subagent_grok
+    backgroundMode: one-shot
+    maxDepth: provider-managed
+```
+
+The Grok Bundle requires the official `grok` 1.0.40 executable on the Host `PATH` or an explicit provider command. For another named instance, add a separate Host provider row with a unique `providerName` and a separate preset tool row with the matching `provider` and a unique `toolName`. Keep `tool-jobs` in the preset for background job controls. Enabling a preset tool does not install, authenticate, or select a model for the native product.

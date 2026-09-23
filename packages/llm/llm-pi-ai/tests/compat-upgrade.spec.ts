@@ -50,9 +50,26 @@ describe('pi-ai gateway compatibility declarations', () => {
     expect(() => resolved(compat, 'anthropic-messages')).toThrow(/compat/)
   })
 
-  it.each(['supportsMidConvoEffort', 'allowedFallbackModels'])('withholds catalog-owned %s', (field) => {
+  it.each([
+    'supportsMidConvoEffort', 'allowedFallbackModels',
+    'supportsMidConvoToolChanges', 'sessionAffinityFormat',
+  ])('withholds catalog-owned %s', (field) => {
     expect(() => resolved({ [field]: true }, 'anthropic-messages'))
       .toThrow(/which is not configurable here/)
+  })
+
+  // Offered, not withheld: pi-ai's Mistral catalog carries no `compat` on any
+  // entry, so only the deployment can say whether its endpoint accepts a system
+  // message mid-conversation. Setting it on a route whose models speak another
+  // protocol still fails, because no model there takes the field.
+  it('offers the Mistral mid-conversation switch and accepts it on its protocol', () => {
+    expect(resolveProfiles({ mistral: { compat: { supportsMidConvoSystemMessages: true } } }))
+      .toBeDefined()
+  })
+
+  it('refuses the Mistral mid-conversation switch on a protocol that does not take it', () => {
+    expect(() => resolved({ supportsMidConvoSystemMessages: true }, 'anthropic-messages'))
+      .toThrow(/no model on the route speaks a protocol that takes it/)
   })
 
   it('keeps generic additions absent unless configured', () => {

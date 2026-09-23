@@ -115,6 +115,14 @@
                   toolName: subagent_claude_code
                   backgroundMode: one-shot
                   maxDepth: provider-managed
+              - id: tool-subagent-grok
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: true
+                config:
+                  provider: grok
+                  toolName: subagent_grok
+                  backgroundMode: one-shot
+                  maxDepth: provider-managed
               - id: workflow-ptc
                 name: '@deepseek-ai/dsh-workflow-ptc'
                 config:

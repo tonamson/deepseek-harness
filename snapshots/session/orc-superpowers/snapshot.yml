@@ -1,0 +1,14 @@
+version: 1
+scenario: orc-superpowers
+profile: headless
+composition: orc-superpowers
+recording: authored
+header:
+  class: orc-superpowers
+  pin: true
+  changes: 9
+  promptChanges: 9
+  childSystemPrompts: [1, 2]
+  childToolSchemas: [1, 2]
+replay:
+  override: true

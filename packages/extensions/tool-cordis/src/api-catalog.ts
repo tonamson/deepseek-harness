@@ -1524,6 +1524,145 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'orc',
+    summary: 'Cordis service that appends `orc/*` events and launches correlated children.',
+    description: 'Cordis service that appends `orc/*` events and launches correlated children. Transition legality comes from `applyOrc`. In-memory handles are not authority.',
+    methods: [
+      {
+        signature: 'planReviewSettled(): Promise<void>',
+        description: 'Wait until plan/review events observed so far have been applied. A review that is not an approval leaves the run unapproved.',
+        parameters: [],
+        returns: 'after the queued reviews settle.',
+      },
+      {
+        signature: 'async createWorkflow(caller: Agent, input: OrcCreateWorkflowInput): Promise<OrcState>',
+        description: 'Open a Supervisor run on the caller\'s session.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent. Its id becomes the root node id.' }, { name: 'input', description: 'prompt and scope. Blocking severities are copied from config.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'roleOf(caller: Agent): OrcRole | undefined',
+        description: 'Read the caller\'s role from the Supervisor log.',
+        parameters: [{ name: 'caller', description: 'live agent whose id is a node id.' }],
+        returns: 'the role, or undefined when the id is not in a run.',
+      },
+      {
+        signature: 'childrenOf(caller: Agent): readonly OrcNode[]',
+        description: 'Read direct children from the Supervisor log.',
+        parameters: [{ name: 'caller', description: 'live agent whose id is a node id.' }],
+        returns: 'child nodes in creation order.',
+      },
+      {
+        signature: 'state(caller: Agent): OrcState',
+        description: 'Project the caller\'s ORC run from its Supervisor log.',
+        parameters: [{ name: 'caller', description: 'any agent in the run, or the Supervisor.' }],
+        returns: 'the current projection.',
+      },
+      {
+        signature: 'registration(caller: Agent, correlationId: OrcCorrelationIdentity): OrcRegistration | undefined',
+        description: 'Recover one delegated run from the Supervisor log.',
+        parameters: [{ name: 'caller', description: 'any agent in the run.' }, { name: 'correlationId', description: 'delegation id.' }],
+        returns: 'the registry row, or undefined when the log has no such id.',
+      },
+      {
+        signature: 'async startSpecPlan(caller: Agent, contextRef: string, signal: AbortSignal): Promise<OrcLaunch>',
+        description: 'Open the next legal Codex spec or plan run, or return the open one. A caller who is not the supervisor is refused before the fold runs.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }, { name: 'contextRef', description: 'completed brainstorm or context reference. Blank text is refused.' }, { name: 'signal', description: 'cancellation before the one-shot run is published.' }],
+        returns: 'the correlated launch.',
+      },
+      {
+        signature: 'runTaskLoop(caller: Agent, signal: AbortSignal): Promise<OrcState>',
+        description: 'Run task review, audit, and the Lead fix until both gates are clean or one result blocks. The fix callback delivers findings to the existing Lead. It does not invent a decision.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }, { name: 'signal', description: 'cancellation for each Codex start and the Lead message.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'runFinalLoop(caller: Agent, signal: AbortSignal): Promise<OrcState>',
+        description: 'Run the branch review and audit. A blocking finding is sent to that task\'s Lead.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }, { name: 'signal', description: 'cancellation for each Codex start and the Lead message.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async assignTask(caller: Agent, input: { readonly taskId: OrcTaskId readonly writeScope: readonly string[] readonly acceptanceCriteria: string }): Promise<OrcState>',
+        description: 'Assign one implementation task while approval is still open. A caller who is not the supervisor is refused before the fold runs.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }, { name: 'input', description: 'task id, write scope, and acceptance criteria.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async spawn(caller: Agent, input: OrcSpawnInput): Promise<OrcLaunch>',
+        description: 'Create a Lead or Peer and start its continuable DeepSeek run.',
+        parameters: [{ name: 'caller', description: 'parent agent. The projection refuses every other edge.' }, { name: 'input', description: 'role, task, and logged prompt fields.' }],
+        returns: 'the correlated node.',
+      },
+      {
+        signature: 'async startTask(caller: Agent, input: { readonly taskId: OrcTaskId; readonly leadNodeId: OrcNodeIdentity }): Promise<OrcState>',
+        description: 'Record that the named Lead started the active task. The caller must be the supervisor or the Lead that owns the task.',
+        parameters: [{ name: 'caller', description: 'supervisor, or the Lead named by `leadNodeId`.' }, { name: 'input', description: 'task id and Lead node id.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async settleTask(caller: Agent, input: { readonly taskId: OrcTaskId readonly leadNodeId: OrcNodeIdentity readonly evidence: string }): Promise<OrcState>',
+        description: 'Record Lead settlement after the projection accepts it. The caller must be the supervisor or the Lead that owns the task.',
+        parameters: [{ name: 'caller', description: 'supervisor, or the Lead named by `leadNodeId`.' }, { name: 'input', description: 'task id, Lead node id, and evidence.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async requestReview(caller: Agent, input: OrcReportRequest): Promise<OrcLaunch>',
+        description: 'Open a Codex review run, or return the open one for this scope. A caller who is not the supervisor is refused before the fold runs.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }, { name: 'input', description: 'task or branch scope.' }],
+        returns: 'the correlated launch.',
+      },
+      {
+        signature: 'async requestAudit(caller: Agent, input: OrcReportRequest): Promise<OrcLaunch>',
+        description: 'Open a Codex audit run, or return the open one for this scope. A caller who is not the supervisor is refused before the fold runs.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }, { name: 'input', description: 'task or branch scope.' }],
+        returns: 'the correlated launch.',
+      },
+      {
+        signature: 'async recordResult(caller: Agent, input: OrcResultInput): Promise<OrcState>',
+        description: 'Append a delegated result after the log row matches the expected run. A Codex stage is refused unless the caller is the supervisor. That check runs before correlation matching.',
+        parameters: [{ name: 'caller', description: 'Supervisor for a Codex result, or the node recording a DeepSeek outcome.' }, { name: 'input', description: 'correlation, stage, role, task, and result fields.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async recordFix(caller: Agent, input: { readonly taskId: OrcTaskId readonly iteration: number readonly decision: string readonly assigneeNodeId?: OrcNodeIdentity }): Promise<OrcState>',
+        description: 'Record the fix decision for the active task. The caller must be the supervisor or the Lead that owns the task.',
+        parameters: [{ name: 'caller', description: 'supervisor, or the Lead that owns `taskId`.' }, { name: 'input', description: 'task id, next iteration, and decision text.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async advance(caller: Agent, to: OrcWorkflowPhase, taskId?: OrcTaskId): Promise<OrcState>',
+        description: 'Advance the workflow when the projection accepts the caller\'s edge.',
+        parameters: [{ name: 'caller', description: 'actor node.' }, { name: 'to', description: 'requested phase.' }, { name: 'taskId', description: 'task id when the edge names one.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async fail(caller: Agent, reason: string): Promise<OrcState>',
+        description: 'Record terminal failure. Only the Supervisor actor is accepted.',
+        parameters: [{ name: 'caller', description: 'actor node.' }, { name: 'reason', description: 'durable failure text.' }],
+        returns: 'the projected run.',
+      },
+      {
+        signature: 'async complete(caller: Agent): Promise<OrcState>',
+        description: 'Record terminal success after a clean branch review and audit. Only the Supervisor may call this. The final-gates tool is the caller that checks the pair first.',
+        parameters: [{ name: 'caller', description: 'Supervisor agent.' }],
+        returns: 'the projected run in `complete`.',
+      },
+      {
+        signature: 'configuredBlockingSeverities(): readonly OrcSeverity[]',
+        description: 'Blocking severities pinned by deployment config.',
+        parameters: [],
+        returns: 'the configured set. Tool arguments cannot replace it.',
+      },
+      {
+        signature: 'async awaitCodex(caller: Agent, correlationId: OrcCorrelationIdentity): Promise<OrcState>',
+        description: 'Wait until the in-process Codex final text for this correlation is recorded. If storage rejected every result append, a later call retries a blocking settlement with the retained text. A new process can see the open row and still have no result promise. This refuses that row instead of recording a clean report.',
+        parameters: [{ name: 'caller', description: 'Supervisor that owns the run.' }, { name: 'correlationId', description: 'delegation id returned by the Codex start.' }],
+        returns: 'the projected run after the parsed or blocking result is recorded.',
+      },
+    ],
+  },
+  {
     key: 'permissionPresets',
     summary: 'Owns the deployment\'s configured permission presets, the fixed Auto integration hook, and their write path.',
     description: 'Owns the deployment\'s configured permission presets, the fixed Auto integration hook, and their write path. Requires a confining `ctx.shell` executor and `ctx.approval`; unmatched knob values are reported as CUSTOM_PRESET, not an error.',
@@ -5592,6 +5731,118 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OptionalSessionSeq',
     declaration: 'export type OptionalSessionSeq = SessionSeq | null;',
+  },
+  {
+    name: 'OrcCorrelationId',
+    declaration: 'export type OrcCorrelationId = Branded<\'OrcCorrelationId\'>;',
+  },
+  {
+    name: 'OrcCreateWorkflowInput',
+    declaration: 'export interface OrcCreateWorkflowInput {\n    readonly prompt: string;\n    readonly skillEnvelope: string;\n    readonly writeScope: readonly string[];\n    readonly acceptanceCriteria: string;\n    readonly reportingFormat: string;\n}',
+  },
+  {
+    name: 'OrcDelegation',
+    declaration: 'export interface OrcDelegation {\n    readonly correlationId: OrcCorrelationId;\n    readonly kind: OrcDelegationKind;\n    readonly status: OrcDelegationStatus;\n    readonly scope: \'workflow\' | OrcReviewScope;\n    readonly iteration: number;\n    readonly blocksProgress: boolean;\n    readonly taskId?: OrcTaskId;\n    readonly nodeId?: OrcNodeId;\n    readonly role?: string;\n    readonly repositoryPath?: string;\n    readonly skillRequirements?: string;\n    readonly outputSchema?: string;\n    readonly readOnly?: true;\n    readonly prompt?: string;\n    readonly skillEnvelope?: string;\n    readonly provider?: string;\n    readonly model?: string;\n    readonly effort?: string;\n    readonly text?: string;\n    readonly rawText?: string;\n    readonly continuationId?: string;\n    readonly messageId?: string;\n    readonly contextRef?: string;\n    readonly findingIds: readonly OrcFindingId[];\n}',
+  },
+  {
+    name: 'OrcDelegationKind',
+    declaration: 'export type OrcDelegationKind = \'codex-spec\' | \'codex-plan\' | \'codex-review\' | \'codex-audit\' | \'deepseek-node\';',
+  },
+  {
+    name: 'OrcDelegationStatus',
+    declaration: 'export type OrcDelegationStatus = \'open\' | OrcReportStatus;',
+  },
+  {
+    name: 'OrcFinding',
+    declaration: 'export interface OrcFinding {\n    readonly id: OrcFindingId;\n    readonly severity: OrcSeverity;\n    readonly status: OrcFindingStatus;\n    readonly summary: string;\n    readonly correlationId: OrcCorrelationId;\n    readonly scope: OrcReviewScope;\n    readonly iteration: number;\n    readonly taskId?: OrcTaskId;\n    readonly file?: string;\n    readonly location?: string;\n    readonly evidence?: string;\n    readonly remediation?: string;\n    readonly sourceStage?: \'codex-review\' | \'codex-audit\';\n}',
+  },
+  {
+    name: 'OrcFindingId',
+    declaration: 'export type OrcFindingId = Branded<\'OrcFindingId\'>;',
+  },
+  {
+    name: 'OrcFindingInput',
+    declaration: 'export interface OrcFindingInput {\n    readonly id: OrcFindingId;\n    readonly severity: OrcSeverity;\n    readonly summary: string;\n    readonly taskId?: OrcTaskId;\n    readonly file?: string;\n    readonly location?: string;\n    readonly evidence?: string;\n    readonly remediation?: string;\n    readonly sourceStage?: \'codex-review\' | \'codex-audit\';\n}',
+  },
+  {
+    name: 'OrcFindingStatus',
+    declaration: 'export type OrcFindingStatus = \'open\' | \'resolved\';',
+  },
+  {
+    name: 'OrcLaunch',
+    declaration: 'export interface OrcLaunch {\n    readonly correlationId: OrcCorrelationIdentity;\n    readonly kind: OrcDelegationKind;\n    readonly spawned: boolean;\n    readonly nodeId?: OrcNodeIdentity;\n}',
+  },
+  {
+    name: 'OrcNode',
+    declaration: 'export interface OrcNode {\n    readonly id: OrcNodeId;\n    readonly parentId?: OrcNodeId;\n    readonly role: OrcRole;\n    readonly phase: OrcNodePhase;\n    readonly taskId?: OrcTaskId;\n    readonly correlationId?: OrcCorrelationId;\n    readonly prompt: string;\n    readonly skillEnvelope: string;\n    readonly writeScope: readonly string[];\n    readonly acceptanceCriteria: string;\n    readonly reportingFormat: string;\n    readonly outcome?: OrcNodeOutcome;\n    readonly evidence?: string;\n    readonly provider?: string;\n    readonly model?: string;\n    readonly effort?: string;\n}',
+  },
+  {
+    name: 'OrcNodeId',
+    declaration: 'export type OrcNodeId = Branded<\'OrcNodeId\'>;',
+  },
+  {
+    name: 'OrcNodeOutcome',
+    declaration: 'export type OrcNodeOutcome = \'settled\' | \'failed\' | \'timeout\' | \'cancelled\' | \'incomplete\';',
+  },
+  {
+    name: 'OrcNodePhase',
+    declaration: 'export type OrcNodePhase = \'active\' | \'settled\' | \'failed\';',
+  },
+  {
+    name: 'OrcRegistration',
+    declaration: 'export interface OrcRegistration {\n    readonly correlationId: OrcCorrelationIdentity;\n    readonly parentId: OrcNodeIdentity;\n    readonly role: string;\n    readonly taskId?: OrcTaskId;\n    readonly stage: OrcDelegationKind;\n    readonly provider?: string;\n    readonly model?: string;\n    readonly effort?: string;\n    readonly nodeId?: OrcNodeIdentity;\n    readonly continuation?: {\n        readonly kind: \'continuable\' | \'one-shot\';\n        readonly id: string;\n        readonly messageId?: string;\n    };\n}',
+  },
+  {
+    name: 'OrcReportRequest',
+    declaration: 'export interface OrcReportRequest {\n    readonly scope: OrcReviewScope;\n    readonly taskId?: OrcTaskId;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'OrcReportStatus',
+    declaration: 'export type OrcReportStatus = \'ok\' | \'failed\' | \'malformed\' | \'unavailable\';',
+  },
+  {
+    name: 'OrcResultInput',
+    declaration: 'export interface OrcResultInput {\n    readonly correlationId: OrcCorrelationIdentity;\n    readonly stage: OrcDelegationKind;\n    readonly role: string;\n    readonly taskId?: OrcTaskId;\n    readonly status?: OrcReportStatus;\n    readonly text?: string;\n    readonly rawText?: string;\n    readonly findings?: readonly OrcFindingInput[];\n    readonly outcome?: OrcNodeOutcome;\n    readonly evidence?: string;\n}',
+  },
+  {
+    name: 'OrcReviewScope',
+    declaration: 'export type OrcReviewScope = \'task\' | \'branch\';',
+  },
+  {
+    name: 'OrcRole',
+    declaration: 'export type OrcRole = \'supervisor\' | \'lead\' | \'peer\';',
+  },
+  {
+    name: 'OrcRunId',
+    declaration: 'export type OrcRunId = Branded<\'OrcRunId\'>;',
+  },
+  {
+    name: 'OrcSeverity',
+    declaration: 'export type OrcSeverity = \'critical\' | \'high\' | \'medium\' | \'low\' | \'info\';',
+  },
+  {
+    name: 'OrcSpawnInput',
+    declaration: 'export interface OrcSpawnInput {\n    readonly role: \'lead\' | \'peer\';\n    readonly taskId: OrcTaskId;\n    readonly prompt: string;\n    readonly skillEnvelope: string;\n    readonly writeScope: readonly string[];\n    readonly acceptanceCriteria: string;\n    readonly reportingFormat: string;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'OrcState',
+    declaration: 'export interface OrcState {\n    readonly runId?: OrcRunId;\n    readonly phase?: OrcWorkflowPhase;\n    readonly blockingSeverities: readonly OrcSeverity[];\n    readonly nodes: readonly OrcNode[];\n    readonly tasks: readonly OrcTask[];\n    readonly activeTaskId?: OrcTaskId;\n    readonly findings: readonly OrcFinding[];\n    readonly delegations: readonly OrcDelegation[];\n    readonly approval?: \'approved\' | \'rejected\';\n    readonly approvalCorrelation?: string;\n    readonly approvalReviewSeq?: number;\n    readonly specText?: string;\n    readonly planText?: string;\n    readonly terminalReason?: string;\n    readonly branchVisit?: number;\n    readonly failure?: string;\n}',
+  },
+  {
+    name: 'OrcTask',
+    declaration: 'export interface OrcTask {\n    readonly id: OrcTaskId;\n    readonly phase: OrcTaskPhase;\n    readonly writeScope: readonly string[];\n    readonly acceptanceCriteria: string;\n    readonly iteration: number;\n    readonly leadNodeId?: OrcNodeId;\n    readonly evidence?: string;\n    readonly fixDecision?: string;\n}',
+  },
+  {
+    name: 'OrcTaskId',
+    declaration: 'export type OrcTaskId = Branded<\'OrcTaskId\'>;',
+  },
+  {
+    name: 'OrcTaskPhase',
+    declaration: 'export type OrcTaskPhase = \'assigned\' | \'started\' | \'unsettled\' | \'settled\' | \'review\' | \'audit\' | \'fix\' | \'clean\' | \'failed\';',
+  },
+  {
+    name: 'OrcWorkflowPhase',
+    declaration: 'export type OrcWorkflowPhase = \'brainstorming\' | \'spec_required\' | \'plan_required\' | \'awaiting_user_approval\' | \'task_implementation\' | \'task_peer_settlement\' | \'task_review\' | \'task_audit\' | \'task_fix\' | \'next_task\' | \'final_review\' | \'complete\' | \'failed\';',
   },
   {
     name: 'PackageResult',

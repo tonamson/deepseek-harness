@@ -289,6 +289,7 @@ describe('ctx.planMode: get/set', () => {
     // A later boundary finds nothing pending — no double append.
     await boundary(ctx, agent, 'step-start')
     expect(agent.session.snapshotEvents().filter(event => event.type === 'plan/mode')).toHaveLength(2)
+    expect(agent.session.snapshotEvents().some(event => event.type === 'plan/review')).toBe(false)
   })
 
   it('a between-turns reversal of a mid-turn pending intent cancels without logging', async () => {
@@ -880,6 +881,7 @@ describe('exit_plan_mode', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([{ type: 'text', text: 'Error: no user-questions channel is available to review the plan; ask the user to switch the session mode instead' }])
     expect(foldPlanMode(agent.session.snapshotEvents())).toBe(true)
+    expect(agent.session.snapshotEvents().some(event => event.type === 'plan/review')).toBe(false)
   })
 
   it('degrades the same way when the seam has no provider (NO_PROVIDER)', async () => {
@@ -921,6 +923,9 @@ describe('exit_plan_mode', () => {
     // step's end, so the plan policy covers any remaining call of the SAME batch.
     expect(foldPlanMode(agent.session.snapshotEvents())).toBe(true)
     expect(ctx.planMode.get(agent)).toEqual({ active: true, pending: false })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'plan/review').map(event => event.data)).toEqual([
+      { version: 1, correlation: `call-exit-${callCounter}`, decision: 'approved' },
+    ])
     await boundary(ctx, agent, 'step-start')
     expect(foldPlanMode(agent.session.snapshotEvents())).toBe(false)
     expect(asked).toHaveLength(1)
@@ -1022,6 +1027,10 @@ describe('exit_plan_mode', () => {
     const result = await callExit(ctx, agent)
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([{ type: 'text', text: 'Error: The user chose to keep planning; revise the plan and present it again.' }])
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'plan/review').map(event => event.data)).toEqual([
+      { version: 1, correlation: `call-exit-${callCounter}`, decision: 'rejected' },
+    ])
+    expect(foldPlanMode(agent.session.snapshotEvents())).toBe(true)
   })
 
   it('a custom-text-only answer is feedback, never consent', async () => {
@@ -1092,6 +1101,9 @@ describe('exit_plan_mode', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([{ type: 'text', text: 'Error: The user dismissed the plan review to speak instead; stay in plan mode, stop here, and wait for their message.' }])
     expect(foldPlanMode(agent.session.snapshotEvents())).toBe(true)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'plan/review').map(event => event.data)).toEqual([
+      { version: 1, correlation: `call-exit-${callCounter}`, decision: 'dismissed' },
+    ])
   })
 
   it('leaves every other review failure its own message', async () => {
@@ -1144,6 +1156,7 @@ describe('exit_plan_mode', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([{ type: 'text', text: 'Error: the plan-mode service was reloaded while the plan was under review; present the plan again' }])
     expect(foldPlanMode(agent.session.snapshotEvents())).toBe(true)
+    expect(agent.session.snapshotEvents().some(event => event.type === 'plan/review')).toBe(false)
   })
 
   it('a throwing provider surfaces as the corrective isError and the mode stays plan', async () => {

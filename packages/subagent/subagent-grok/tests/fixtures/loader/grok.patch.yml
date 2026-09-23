@@ -1,0 +1,47 @@
+# Named Grok instances over the shipped provider Bundle. No product process
+# starts during this composition-only test.
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- insert:
+    - id: fixture
+      name: './fixture.ts'
+
+    - id: subagent-grok-primary
+      name: '@deepseek-ai/dsh-subagent-grok'
+      config:
+        providerName: grok-primary
+        model: grok-primary-model
+
+    - id: subagent-grok-secondary
+      name: '@deepseek-ai/dsh-subagent-grok'
+      config:
+        providerName: grok-secondary
+        model: grok-secondary-model
+
+    - id: tool-subagent-grok
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: grok
+        toolName: subagent_grok
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-grok-primary
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: grok-primary
+        toolName: subagent_grok_primary
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-grok-secondary
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: grok-secondary
+        toolName: subagent_grok_secondary
+        backgroundMode: one-shot
+        maxDepth: provider-managed

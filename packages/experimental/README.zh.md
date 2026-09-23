@@ -31,6 +31,9 @@ kind: "package-group"
 | [`voice-input-bundle`](voice-input-bundle/README.zh.md) | 默认禁用的可选语音输入组合 | — |
 | [`agent-team-profile`](agent-team-profile/README.zh.md) | Agent Teams 协作、工具与 Web UI 组合包 | — |
 | [`agent-team`](agent-team/README.zh.md) | 具名 teammate，成员之间持久消息与共享任务板 | `ctx.agentTeams` |
+| [`orc`](orc/README.zh.md) | 持久的 Supervisor、Lead 与 Peer 工作流投影 | — |
+| [`orc-profile`](orc-profile/README.zh.md) | 严格 ORC 工作流的可选 profile 层 | — |
+| [`tool-orc`](tool-orc/README.zh.md) | 按角色划分的 ORC 工具与 Superpowers 提示信封 | 按作用域把工具注册到 `ctx.tools` |
 | [`client-ui-agent-team`](client-ui-agent-team/README.zh.md) | Web Team roster、任务板与 teammate 导航 | — |
 | [`auto-review`](auto-review/README.zh.md) | 显式 Web 层，在每个原生或 PTC inner 工具调用前使用同一模型审查 | — |
 | [`ptc-runtime-python`](ptc-runtime-python/README.zh.md) | PTC 执行 seam 的 CPython 子进程后端 | `ctx.ptcRuntime` |

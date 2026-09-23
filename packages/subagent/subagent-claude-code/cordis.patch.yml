@@ -4,3 +4,5 @@
 - insert:
     - id: subagent-claude-code
       name: '@deepseek-ai/dsh-subagent-claude-code'
+      config:
+        model: claude-sonnet-5

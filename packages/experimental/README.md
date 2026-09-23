@@ -31,6 +31,9 @@ The experimental group contains prototype capabilities whose contracts can chang
 | [`voice-input-bundle`](voice-input-bundle/README.md) | Default-disabled optional voice input composition | — |
 | [`agent-team-profile`](agent-team-profile/README.md) | Agent Teams collaboration, tools, and Web UI bundle | — |
 | [`agent-team`](agent-team/README.md) | Named teammates with durable messages and a shared task board | `ctx.agentTeams` |
+| [`orc`](orc/README.md) | Durable Supervisor, Lead, and Peer workflow projection | — |
+| [`orc-profile`](orc-profile/README.md) | Opt-in profile layer for the strict ORC workflow | — |
+| [`tool-orc`](tool-orc/README.md) | Role-scoped ORC tools and Superpowers prompt envelopes | registers scoped tools on `ctx.tools` |
 | [`client-ui-agent-team`](client-ui-agent-team/README.md) | Team roster, task board, and teammate navigation for Web | — |
 | [`auto-review`](auto-review/README.md) | Explicit Web layer for same-model review before each native or PTC inner tool call | — |
 | [`ptc-runtime-python`](ptc-runtime-python/README.md) | CPython subprocess backend for the PTC execution seam | `ctx.ptcRuntime` |

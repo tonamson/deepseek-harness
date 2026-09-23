@@ -174,6 +174,7 @@
       "@deepseek-ai/dsh-scope/invariant": ["./packages/core/scope/src/invariant.ts"],
       "@deepseek-ai/dsh-agent-loop/invariant": ["./packages/core/agent-loop/src/invariant.ts"],
       "@deepseek-ai/dsh-experimental-agent-team/invariant": ["./packages/experimental/agent-team/src/invariant.ts"],
+      "@deepseek-ai/dsh-experimental-orc/invariant": ["./packages/experimental/orc/src/invariant.ts"],
       // host/client package names prefix the group dir (dsh-client-<dir>), so
       // the generated aliases below — which map a package only when its name is
       // exactly dsh-<dir> — skip them; strip the group prefix with a dedicated
@@ -314,6 +315,9 @@
       "@deepseek-ai/dsh-experimental-inspector": ["./packages/experimental/inspector/src"],
       "@deepseek-ai/dsh-experimental-inspector/client": ["./packages/experimental/inspector/src/client/index.ts"],
       "@deepseek-ai/dsh-experimental-ptc-runtime-python": ["./packages/experimental/ptc-runtime-python/src"],
+      "@deepseek-ai/dsh-experimental-orc": ["./packages/experimental/orc/src"],
+      "@deepseek-ai/dsh-experimental-orc-profile": ["./packages/experimental/orc-profile/src"],
+      "@deepseek-ai/dsh-experimental-tool-orc": ["./packages/experimental/tool-orc/src"],
       "@deepseek-ai/dsh-util-crypto": ["./packages/util/crypto/src"],
       "@deepseek-ai/dsh-util-values": ["./packages/util/values/src"],
       // util/ folders are role-named without the util- prefix their npm names carry,
@@ -480,6 +484,7 @@
       "@deepseek-ai/dsh-subagent-codex": ["./packages/subagent/subagent-codex/src"],
       "@deepseek-ai/dsh-subagent-dsh-sdk": ["./packages/subagent/subagent-dsh-sdk/src"],
       "@deepseek-ai/dsh-subagent-fork-in-process": ["./packages/subagent/subagent-fork-in-process/src"],
+      "@deepseek-ai/dsh-subagent-grok": ["./packages/subagent/subagent-grok/src"],
       "@deepseek-ai/dsh-subagent-in-process-driver": ["./packages/subagent/subagent-in-process-driver/src"],
       "@deepseek-ai/dsh-subagent-spawn-in-process": ["./packages/subagent/subagent-spawn-in-process/src"],
       "@deepseek-ai/dsh-subprocess": ["./packages/subprocess/subprocess/src"],
