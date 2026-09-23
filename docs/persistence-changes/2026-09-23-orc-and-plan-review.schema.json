@@ -1,0 +1,2828 @@
+{
+  "formatVersion": 1,
+  "roots": [
+    {
+      "key": "event:orc/audit/requested",
+      "kind": "event",
+      "event": "orc/audit/requested",
+      "surface": false,
+      "digest": "3fa1c82891b73cf92c549d5cf4c7454109cb662b76a749596a69c6497a1c9a53",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "continuationId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "effort",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "iteration",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "model",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "outputSchema",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "readOnly",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "repositoryPath",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "role",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "scope",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "skillRequirements",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "version",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7,
+              8,
+              9
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "audit-only"
+          },
+          {
+            "kind": "literal",
+            "value": "spec-only"
+          },
+          {
+            "kind": "literal",
+            "value": "plan-only"
+          },
+          {
+            "kind": "literal",
+            "value": "review-only"
+          },
+          {
+            "kind": "union",
+            "types": [
+              11,
+              12
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "branch"
+          },
+          {
+            "kind": "literal",
+            "value": "task"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": "orc/audit/requested"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/audit/result",
+      "kind": "event",
+      "event": "orc/audit/result",
+      "surface": false,
+      "digest": "ca99a6e6d6b11f6df819e5665e2a5b6331cce44a9ae498db816510336f42bdf9",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 20,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 21,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 21,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 22,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "findings",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "rawText",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 19,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "evidence",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "file",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "location",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "remediation",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "severity",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "sourceStage",
+                "type": 11,
+                "optional": true
+              },
+              {
+                "name": "summary",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7,
+              8,
+              9,
+              10
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "critical"
+          },
+          {
+            "kind": "literal",
+            "value": "high"
+          },
+          {
+            "kind": "literal",
+            "value": "info"
+          },
+          {
+            "kind": "literal",
+            "value": "low"
+          },
+          {
+            "kind": "literal",
+            "value": "medium"
+          },
+          {
+            "kind": "union",
+            "types": [
+              12,
+              13
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "codex-audit"
+          },
+          {
+            "kind": "literal",
+            "value": "codex-review"
+          },
+          {
+            "kind": "union",
+            "types": [
+              15,
+              16,
+              17,
+              18
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "failed"
+          },
+          {
+            "kind": "literal",
+            "value": "ok"
+          },
+          {
+            "kind": "literal",
+            "value": "malformed"
+          },
+          {
+            "kind": "literal",
+            "value": "unavailable"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/audit/result"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/finding/resolved",
+      "kind": "event",
+      "event": "orc/finding/resolved",
+      "surface": false,
+      "digest": "284d8d0fa51bd0c8b99bf9f57e1605c5796e084ee99a1b07964334fb892188fe",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "findingId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/finding/resolved"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/fix/iteration",
+      "kind": "event",
+      "event": "orc/fix/iteration",
+      "surface": false,
+      "digest": "96bff6d4a7cbafe4bb36d6e27536247e49f91251e0d01c1d7d68856402d3abe1",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "assigneeNodeId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "decision",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "iteration",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "orc/fix/iteration"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/node/created",
+      "kind": "event",
+      "event": "orc/node/created",
+      "surface": false,
+      "digest": "4338b079feed6596587eaa4640ee0d192bddb41d2d2d9ea2815a2524d45dac07",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 10,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "acceptanceCriteria",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "effort",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "messageId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "model",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "nodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "parentId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "prompt",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "reportingFormat",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "role",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "skillEnvelope",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "writeScope",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "lead"
+          },
+          {
+            "kind": "literal",
+            "value": "peer"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/node/created"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/node/settled",
+      "kind": "event",
+      "event": "orc/node/settled",
+      "surface": false,
+      "digest": "a36dbf1471dcfa06c8e0f98d56d54897be26b6871843625bad7ed676c1609499",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 10,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 12,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "evidence",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "nodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "outcome",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 9,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7,
+              8
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "cancelled"
+          },
+          {
+            "kind": "literal",
+            "value": "failed"
+          },
+          {
+            "kind": "literal",
+            "value": "incomplete"
+          },
+          {
+            "kind": "literal",
+            "value": "settled"
+          },
+          {
+            "kind": "literal",
+            "value": "timeout"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/node/settled"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/phase",
+      "kind": "event",
+      "event": "orc/phase",
+      "surface": false,
+      "digest": "f9247bba55214a3dada2ae8288e6ffdb208bf1f95e0ff3a77696b5ec91fce023",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 18,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 19,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 20,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "actorNodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "to",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 17,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "awaiting_user_approval"
+          },
+          {
+            "kind": "literal",
+            "value": "brainstorming"
+          },
+          {
+            "kind": "literal",
+            "value": "task_fix"
+          },
+          {
+            "kind": "literal",
+            "value": "task_implementation"
+          },
+          {
+            "kind": "literal",
+            "value": "task_peer_settlement"
+          },
+          {
+            "kind": "literal",
+            "value": "task_review"
+          },
+          {
+            "kind": "literal",
+            "value": "complete"
+          },
+          {
+            "kind": "literal",
+            "value": "failed"
+          },
+          {
+            "kind": "literal",
+            "value": "final_review"
+          },
+          {
+            "kind": "literal",
+            "value": "next_task"
+          },
+          {
+            "kind": "literal",
+            "value": "plan_required"
+          },
+          {
+            "kind": "literal",
+            "value": "spec_required"
+          },
+          {
+            "kind": "literal",
+            "value": "task_audit"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/phase"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/plan/approval",
+      "kind": "event",
+      "event": "orc/plan/approval",
+      "surface": false,
+      "digest": "b461c28b1c37dc73bb65274515c90fa213fb625b300a509f587b9dbe66acf5d8",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 10,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "correlation",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "decision",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "reviewSeq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "source",
+                "type": 7,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "approved"
+          },
+          {
+            "kind": "literal",
+            "value": "rejected"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "plan/review"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "orc/plan/approval"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/plan/requested",
+      "kind": "event",
+      "event": "orc/plan/requested",
+      "surface": false,
+      "digest": "5481a21e1acaf0054dc895dc55beae0bc0862272e7abe8e8368986c2bc6557db",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "contextRef",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "continuationId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "effort",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "model",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "outputSchema",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "readOnly",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "repositoryPath",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "role",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "skillRequirements",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "plan-only"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/plan/requested"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/plan/result",
+      "kind": "event",
+      "event": "orc/plan/result",
+      "surface": false,
+      "digest": "765b5bcfbc43b0f5e97ba397211c001115c56c70ed1509bad74a3bf097a43e53",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 11,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "planText",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "rawText",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "failed"
+          },
+          {
+            "kind": "literal",
+            "value": "malformed"
+          },
+          {
+            "kind": "literal",
+            "value": "ok"
+          },
+          {
+            "kind": "literal",
+            "value": "unavailable"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/plan/result"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/review/requested",
+      "kind": "event",
+      "event": "orc/review/requested",
+      "surface": false,
+      "digest": "dc5583c1edb3c2e0dc89ef950b543dbcd45c09bfdef4a4e1495331555c2c1d02",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "continuationId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "effort",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "iteration",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "model",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "outputSchema",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "readOnly",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "repositoryPath",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "role",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "scope",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "skillRequirements",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "version",
+                "type": 13,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7,
+              8,
+              9
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "audit-only"
+          },
+          {
+            "kind": "literal",
+            "value": "spec-only"
+          },
+          {
+            "kind": "literal",
+            "value": "plan-only"
+          },
+          {
+            "kind": "literal",
+            "value": "review-only"
+          },
+          {
+            "kind": "union",
+            "types": [
+              11,
+              12
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "branch"
+          },
+          {
+            "kind": "literal",
+            "value": "task"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": "orc/review/requested"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/review/result",
+      "kind": "event",
+      "event": "orc/review/result",
+      "surface": false,
+      "digest": "4542a82b9afb8e9de2a05792cfa1d20db6d9768d1566fab41dcf7ef86015ddcb",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 20,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 21,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 21,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 22,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "findings",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "rawText",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "status",
+                "type": 14,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 19,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "evidence",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "file",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "id",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "location",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "remediation",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "severity",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "sourceStage",
+                "type": 11,
+                "optional": true
+              },
+              {
+                "name": "summary",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              6,
+              7,
+              8,
+              9,
+              10
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "critical"
+          },
+          {
+            "kind": "literal",
+            "value": "high"
+          },
+          {
+            "kind": "literal",
+            "value": "info"
+          },
+          {
+            "kind": "literal",
+            "value": "low"
+          },
+          {
+            "kind": "literal",
+            "value": "medium"
+          },
+          {
+            "kind": "union",
+            "types": [
+              12,
+              13
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "codex-audit"
+          },
+          {
+            "kind": "literal",
+            "value": "codex-review"
+          },
+          {
+            "kind": "union",
+            "types": [
+              15,
+              16,
+              17,
+              18
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "failed"
+          },
+          {
+            "kind": "literal",
+            "value": "ok"
+          },
+          {
+            "kind": "literal",
+            "value": "malformed"
+          },
+          {
+            "kind": "literal",
+            "value": "unavailable"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/review/result"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/run/completed",
+      "kind": "event",
+      "event": "orc/run/completed",
+      "surface": false,
+      "digest": "42e7eea47917b263695a1e120708f9d82ac464623b81f02a1197ba7c8fbeeb7f",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "actorNodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/run/completed"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/run/failed",
+      "kind": "event",
+      "event": "orc/run/failed",
+      "surface": false,
+      "digest": "06e69ae88bb10ae16e258c337b93737b269f342acd5b937b93b34c0e8431a2d5",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "actorNodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/run/failed"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/spec/requested",
+      "kind": "event",
+      "event": "orc/spec/requested",
+      "surface": false,
+      "digest": "881c684de5a471f47e40f0683a54e2fd5114f81c11fdc36207a795321dc9c49e",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "contextRef",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "continuationId",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "effort",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "model",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "outputSchema",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "readOnly",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "repositoryPath",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "role",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "skillRequirements",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "literal",
+            "value": "spec-only"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/spec/requested"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/spec/result",
+      "kind": "event",
+      "event": "orc/spec/result",
+      "surface": false,
+      "digest": "dd8e7921567f741927c3de987a9debf86188991ff6bf0db23c6b1e8ce8c8ddd7",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 11,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "correlationId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "rawText",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "specText",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "status",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "failed"
+          },
+          {
+            "kind": "literal",
+            "value": "malformed"
+          },
+          {
+            "kind": "literal",
+            "value": "ok"
+          },
+          {
+            "kind": "literal",
+            "value": "unavailable"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/spec/result"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/task/assigned",
+      "kind": "event",
+      "event": "orc/task/assigned",
+      "surface": false,
+      "digest": "ec0627a65514bdaa92e61a7ba71faf1df0faa69f093cb385dcde826e2f912592",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 5,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "acceptanceCriteria",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "writeScope",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/task/assigned"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/task/settled",
+      "kind": "event",
+      "event": "orc/task/settled",
+      "surface": false,
+      "digest": "dc9fd718619631987854956005a66722f4438d94864fa8a7c08ba145b4160d12",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "evidence",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "leadNodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/task/settled"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/task/started",
+      "kind": "event",
+      "event": "orc/task/started",
+      "surface": false,
+      "digest": "ee0bd7b2540d178a9bc32ff767e427888f2fde73762413915ec6409fd364bea0",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "leadNodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "taskId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/task/started"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:orc/workflow/created",
+      "kind": "event",
+      "event": "orc/workflow/created",
+      "surface": false,
+      "digest": "957ac530b3edb18c6d7493c37fd0d4ee31903f218b5fd676f9d15afebaac1ae8",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 12,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 13,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 14,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "acceptanceCriteria",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "blockingSeverities",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "effort",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "model",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "prompt",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "reportingFormat",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "runId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "skillEnvelope",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "supervisorNodeId",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 10,
+                "optional": false
+              },
+              {
+                "name": "writeScope",
+                "type": 11,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "array",
+            "element": 4
+          },
+          {
+            "kind": "union",
+            "types": [
+              5,
+              6,
+              7,
+              8,
+              9
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "medium"
+          },
+          {
+            "kind": "literal",
+            "value": "critical"
+          },
+          {
+            "kind": "literal",
+            "value": "high"
+          },
+          {
+            "kind": "literal",
+            "value": "info"
+          },
+          {
+            "kind": "literal",
+            "value": "low"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "orc/workflow/created"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:plan/review",
+      "kind": "event",
+      "event": "plan/review",
+      "surface": false,
+      "digest": "2f30fec050667e41cf2da3250324f1d5505567581ed3910f2062dd4bd8f63e94",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 8,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 10,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "correlation",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "decision",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 7,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "union",
+            "types": [
+              4,
+              5,
+              6
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "approved"
+          },
+          {
+            "kind": "literal",
+            "value": "dismissed"
+          },
+          {
+            "kind": "literal",
+            "value": "rejected"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "plan/review"
+          }
+        ]
+      }
+    }
+  ],
+  "types": []
+}

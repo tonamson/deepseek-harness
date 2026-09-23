@@ -183,13 +183,13 @@ async function boot(config: OrcServiceConfig): Promise<Harness> {
   ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
   await ctx.plugin(FakePersistence)
   await ctx.plugin(FakeSubagents)
-  ;(ctx.get('subagents') as FakeSubagents).owner = ctx
+  ;(ctx.get('subagents') as unknown as FakeSubagents).owner = ctx
   await ctx.plugin(OrcService, config)
   await ctx.plugin(PlanModeController, { section: 'Plan the change. Do not edit files.' })
   await ctx.plugin(UserQuestionService)
   await ctx.plugin(toolOrc)
   const supervisor = await publishAgent(ctx, 'supervisor')
-  return { ctx, supervisor, orc: ctx.orc, fake: ctx.get('subagents') as FakeSubagents }
+  return { ctx, supervisor, orc: ctx.orc, fake: ctx.get('subagents') as unknown as FakeSubagents }
 }
 
 async function openWorkflow(harness: Harness): Promise<void> {
@@ -203,7 +203,7 @@ async function openWorkflow(harness: Harness): Promise<void> {
   })
 }
 
-function codexText(stage: 'codex-spec' | 'codex-plan' | 'codex-review' | 'codex-audit', body: unknown): SubagentResult {
+function codexText(_stage: 'codex-spec' | 'codex-plan' | 'codex-review' | 'codex-audit', body: unknown): SubagentResult {
   return { output: [{ type: 'text', text: JSON.stringify(body) }], stopReason: 'completed' }
 }
 
@@ -226,7 +226,14 @@ async function answerReview(harness: Harness, selected: string[], callId = 'call
 
 async function toolNames(harness: Harness): Promise<string[]> {
   const scope = scopeOf(harness.supervisor.ctx)
+  if (scope === undefined) throw new Error('supervisor scope is required')
   return (await harness.ctx.systemPrompt.assemble({ scope })).tools.map(tool => tool.name)
+}
+
+function requiredScope(ctx: Parameters<typeof scopeOf>[0]): NonNullable<ReturnType<typeof scopeOf>> {
+  const scope = scopeOf(ctx)
+  if (scope === undefined) throw new Error('scope is required')
+  return scope
 }
 
 function expectPhaseOrder(phases: readonly string[], expected: readonly string[]): void {
@@ -238,7 +245,7 @@ function expectPhaseOrder(phases: readonly string[], expected: readonly string[]
   }
 }
 
-/** `orc/*` is outside SessionEventMap. Widen the snapshot before reading those rows. */
+/** Read ORC rows without depending on the caller's local event narrowing. */
 function plainEvents(session: { snapshotEvents(): readonly { type: string; seq: number; data: unknown }[] }): readonly {
   type: string
   seq: number
@@ -326,7 +333,7 @@ describe('ORC profile composition', () => {
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(FakePersistence)
     await ctx.plugin(FakeSubagents)
-    ;(ctx.get('subagents') as FakeSubagents).owner = ctx
+    ;(ctx.get('subagents') as unknown as FakeSubagents).owner = ctx
     await ctx.plugin(Loader)
     ctx.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
@@ -345,7 +352,7 @@ describe('ORC profile composition', () => {
     await ctx.loader.await()
     for (const entry of ctx.loader.entries()) await entry.fiber?.await()
     const supervisor = await publishAgent(ctx, 'loader-supervisor')
-    const names = (await ctx.systemPrompt.assemble({ scope: scopeOf(supervisor.ctx) })).tools.map(tool => tool.name)
+    const names = (await ctx.systemPrompt.assemble({ scope: requiredScope(supervisor.ctx) })).tools.map(tool => tool.name)
     expect(names).toContain('orc_request_spec_plan')
     expect(names).toContain('orc_run_task_gates')
     expect(names).not.toContain('orc_record_plan_decision')
@@ -357,7 +364,7 @@ describe('ORC profile composition', () => {
       reportingFormat: 'events',
       blockingSeverities: ['critical', 'high', 'medium'],
     })
-    const fake = ctx.get('subagents') as FakeSubagents
+    const fake = ctx.get('subagents') as unknown as FakeSubagents
     fake.queue.push(Promise.resolve(codexText('codex-spec', { stage: 'codex-spec', spec: 'design is complete' })))
     await ctx.orc.startSpecPlan(supervisor, 'brainstorm-1', SIGNAL)
     expect(fake.oneShot[0]?.name).toBe('codex-spec')
@@ -369,7 +376,7 @@ describe('ORC profile composition', () => {
     open.push(plain)
     await mountAgentLoopTestDependencies(plain)
     const plainAgent = await publishAgent(plain, 'standard-agent')
-    const plainNames = (await plain.systemPrompt.assemble({ scope: scopeOf(plainAgent.ctx) })).tools.map(tool => tool.name)
+    const plainNames = (await plain.systemPrompt.assemble({ scope: requiredScope(plainAgent.ctx) })).tools.map(tool => tool.name)
     expect(plainNames.some(name => name.startsWith('orc_'))).toBe(false)
     expect(plain.get('orc')).toBeUndefined()
   })
@@ -387,7 +394,7 @@ describe('ORC profile composition', () => {
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(FakePersistence)
     await ctx.plugin(FakeSubagents)
-    ;(ctx.get('subagents') as FakeSubagents).owner = ctx
+    ;(ctx.get('subagents') as unknown as FakeSubagents).owner = ctx
     await ctx.plugin(Loader)
     ctx.loader.builtins.include = Include
     ctx.loader.builtins.group = Group
@@ -417,7 +424,7 @@ describe('ORC profile composition', () => {
     expect(configOf('tool-subagent-codex-review')).toMatchObject({ provider: 'codex-review' })
     expect(configOf('tool-subagent-codex-audit')).toMatchObject({ provider: 'codex-audit' })
     const supervisor = await publishAgent(ctx, 'composed-supervisor')
-    const names = (await ctx.systemPrompt.assemble({ scope: scopeOf(supervisor.ctx) })).tools.map(tool => tool.name)
+    const names = (await ctx.systemPrompt.assemble({ scope: requiredScope(supervisor.ctx) })).tools.map(tool => tool.name)
     expect(names).toContain('orc_request_spec_plan')
     expect(names).toContain('orc_spawn')
     expect(names).toContain('orc_run_task_gates')
@@ -631,7 +638,7 @@ describe('ORC plan approval and fix loop', () => {
     const afterFinal = branchPhases.slice(branchPhases.indexOf('final_review') + 1)
     expectPhaseOrder(afterFinal, ['task_fix', 'task_review', 'task_audit', 'final_review'])
     expect(await toolNames(harness)).toEqual(expect.arrayContaining(['orc_run_final_gates', 'orc_request_review', 'orc_request_audit']))
-    const visible = (await harness.ctx.systemPrompt.assemble({ scope: scopeOf(harness.supervisor.ctx) })).tools.map(tool => tool.name)
+    const visible = (await harness.ctx.systemPrompt.assemble({ scope: requiredScope(harness.supervisor.ctx) })).tools.map(tool => tool.name)
     expect(visible).toContain('orc_run_final_gates')
     expect(visible).toContain('orc_spawn')
   })

@@ -1139,7 +1139,34 @@ export class OrcService extends Service {
       watched.admit()
       const decision = await watched.done
       if (decision === undefined) return { failed: `lead ${String(leadId)} did not report a fix after ${messageId}` }
+      await this.leadFinishNotice(caller, String(leadId))
       return { decision, assigneeNodeId: leadId }
+    }
+  }
+
+  /**
+   * Let the Lead's background-finished notice reach the caller log before later fix events.
+   * Absent notices stop after a short bound so a Lead that does not park still records the fix.
+   */
+  private async leadFinishNotice(caller: Agent, leadId: string): Promise<void> {
+    const needle = `Background subagent ${leadId} finished`
+    const deadline = Date.now() + 500
+    while (Date.now() < deadline) {
+      const seen = caller.session.snapshotEvents().some((event) => {
+        if (event.type !== 'agent/inbox/spliced') return false
+        const inserted = (event.data as { inserted?: unknown }).inserted
+        if (!Array.isArray(inserted)) return false
+        return inserted.some((message) => {
+          const content = (message as { content?: unknown }).content
+          if (!Array.isArray(content)) return false
+          return content.some((part) => {
+            const text = (part as { text?: unknown }).text
+            return (part as { type?: unknown }).type === 'text' && typeof text === 'string' && text.includes(needle)
+          })
+        })
+      })
+      if (seen) return
+      await new Promise((resolve) => { setTimeout(resolve, 5) })
     }
   }
 
@@ -1153,10 +1180,6 @@ export class OrcService extends Service {
     admit: () => void
     cancel: () => void
   } {
-    const lead = this.ctx.agents.get(SessionId(leadId))
-    if (lead === undefined) {
-      return { done: Promise.resolve(undefined), admit: () => {}, cancel: () => {} }
-    }
     let admitted = false
     let text: string | undefined
     let settled = false
@@ -1164,19 +1187,23 @@ export class OrcService extends Service {
     let resolveDone: (value: string | undefined) => void = () => {}
     const done = new Promise<string | undefined>((resolve, reject) => {
       resolveDone = resolve
+      // A parked Lead is absent until sendMessage materializes it. Resolve on each event.
+      const leadOf = (): Agent | undefined => this.ctx.agents.get(SessionId(leadId))
       const finish = (): void => {
-        if (!admitted || settled || lead.status !== 'idle') return
+        const lead = leadOf()
+        if (!admitted || settled || lead === undefined || lead.status !== 'idle') return
         settled = true
         stop()
         resolve(text)
       }
       const stopEvent = this.ctx.on('session/event', (session, event) => {
-        if (!admitted || session !== lead.session || event.type !== 'assistant/message') return
+        const lead = leadOf()
+        if (!admitted || lead === undefined || session !== lead.session || event.type !== 'assistant/message') return
         const next = assistantText(event.data)
         if (next !== undefined) text = next
       })
       const stopStatus = this.ctx.on('agent/status', ({ agent }) => {
-        if (agent === lead) finish()
+        if (String(agent.id) === leadId) finish()
       })
       stop = (): void => {
         stopEvent()

@@ -66,27 +66,23 @@ profile 必须已经包含 `@deepseek-ai/dsh-base`，以及名为 `codex-spec`�
 <a id="model-experience"></a>
 ## 模型体验
 
-### ORC 路由
-
-#### 模型看到什么
-
-persona 与工具目录属于 agent preset 和 [`@deepseek-ai/dsh-experimental-tool-orc`](../tool-orc/README.zh.md)。本 bundle 只发布这些工具读取的服务配置。
+间接地，通过 agent preset 与 `@deepseek-ai/dsh-experimental-tool-orc`；它们拥有 persona 与工具目录。
 
 #### KV Cache 影响
 
 本包没有影响。子代理提示在各自的会话里。
 
------
-
-<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与延期工作
 
-这里不注册 Codex 提供方。没有 `codex-spec`、`codex-review` 与 `codex-audit` 的 profile 无法启动这些运行。未添加本 bundle 的 profile 不受这份 patch 影响。
+<a id="known-limitations-and-deferred-work"></a>
+
+- **本 bundle 不注册 Codex 提供方** — 没有 `codex-spec`、`codex-review` 与 `codex-audit` 的 profile 无法启动这些运行。
+- **这份 patch 不改已有 profile** — 未添加本 bundle 的 profile 保持原样。
 
 -----
 
 <a id="dev-note"></a>
-## 开发备注
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>

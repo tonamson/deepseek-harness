@@ -1,0 +1,59 @@
+# Keyless twin: replay serves DeepSeek. Codex providers are the local fixture.
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  disabled: true
+
+- insert:
+    - id: llm-replay
+      name: '@deepseek-ai/dsh-llm-replay'
+      config:
+        providers:
+          - id: deepseek-official
+            name: DeepSeek
+            models:
+              - id: deepseek-v4-flash
+                reasoningEfforts: [high]
+              - id: deepseek-v4-flash-vision-exp
+                inputModalities: [text, image]
+                reasoningEfforts: [high]
+    - id: orc
+      name: '@deepseek-ai/dsh-experimental-orc'
+      config:
+        deepseek:
+          subagentProvider: spawn
+          provider: deepseek-official
+          model: deepseek-v4-flash
+          effort: high
+        codexSpec:
+          subagentProvider: codex-spec
+          provider: codex-spec
+          model: gpt-5.6-terra
+          effort: high
+        codexPlan:
+          subagentProvider: codex-spec
+          provider: codex-spec
+          model: gpt-5.6-terra
+          effort: high
+        codexReview:
+          subagentProvider: codex-review
+          provider: codex-review
+          model: gpt-5.6-luna
+          effort: high
+        codexAudit:
+          subagentProvider: codex-audit
+          provider: codex-audit
+          model: gpt-5.6-luna
+          effort: xhigh
+        repositoryPath: .
+        skillRequirements: >-
+          Superpowers workflow: brainstorming, writing-plans, subagent-driven-development,
+          per-task review and audit, Lead fix, and a final branch review and audit.
+        specOutputSchema: codex-spec
+        planOutputSchema: codex-plan
+        reviewOutputSchema: codex-review
+        auditOutputSchema: codex-audit
+    - id: tool-orc
+      name: '@deepseek-ai/dsh-experimental-tool-orc'
+    - id: orc-snapshot-fixture
+      name: '../../../packages/experimental/tool-orc/tests/fixtures/orc-snapshot-fixture.mjs'

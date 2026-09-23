@@ -450,3 +450,48 @@ export type OrcEvent = {
     readonly data: OrcEventMap[Type]
   }
 }[OrcEventType]
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** Opens one run and records the Supervisor prompt, skill envelope, write scope, and blocking severities. */
+    'orc/workflow/created': OrcWorkflowCreated
+    /** Records one Lead or Peer, including its prompt, skill envelope, task, and message id after startContinuable returns. */
+    'orc/node/created': OrcNodeCreated
+    /** Records one role node's outcome and optional evidence. */
+    'orc/node/settled': OrcNodeSettled
+    /** Records a Codex spec request. `contextRef` is required and is not replaced by prompt text. */
+    'orc/spec/requested': OrcSpecRequested
+    /** Records a Codex spec status, normalized spec text, and raw Codex text when that answer was stored. */
+    'orc/spec/result': OrcSpecResult
+    /** Records a Codex plan request. `contextRef` is required and is not replaced by prompt text. */
+    'orc/plan/requested': OrcPlanRequested
+    /** Records a Codex plan status, normalized plan text, and raw Codex text when that answer was stored. */
+    'orc/plan/result': OrcPlanResult
+    /** Copies one Supervisor `plan/review` decision, including that event's correlation and session seq. */
+    'orc/plan/approval': OrcPlanApproval
+    /** Records one implementation task id, write scope, and acceptance criteria. */
+    'orc/task/assigned': OrcTaskAssigned
+    /** Records the Lead node that started one task. */
+    'orc/task/started': OrcTaskStarted
+    /** Records Lead settlement evidence for one task. */
+    'orc/task/settled': OrcTaskSettled
+    /** Records a Codex review assignment, its scope, iteration, and task id when the review is task-local. */
+    'orc/review/requested': OrcReviewRequested
+    /** Records a Codex review status, findings, and raw Codex text when that answer was stored. */
+    'orc/review/result': OrcReviewResult
+    /** Records a Codex audit assignment. An audit request is not a review request. */
+    'orc/audit/requested': OrcReviewRequested
+    /** Records a Codex audit status, findings, and raw Codex text when that answer was stored. */
+    'orc/audit/result': OrcReviewResult
+    /** Records that one finding is resolved. Resolution does not by itself advance the run. */
+    'orc/finding/resolved': OrcFindingResolved
+    /** Records one fix-loop decision, its iteration, task id, and assignee when one was named. */
+    'orc/fix/iteration': OrcFixIteration
+    /** Records one guarded phase transition and the actor node that requested it. */
+    'orc/phase': OrcPhaseTransition
+    /** Records terminal failure and the Supervisor actor. */
+    'orc/run/failed': OrcRunFailed
+    /** Records terminal completion and the Supervisor actor. */
+    'orc/run/completed': OrcRunCompleted
+  }
+}

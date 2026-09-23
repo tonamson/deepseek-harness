@@ -300,7 +300,7 @@ async function setup(): Promise<Harness> {
   await ctx.plugin(InvariantService, { enabled: true })
   await ctx.plugin(OrcInvariant)
   await ctx.plugin(OrcService, CONFIG)
-  return { ctx, service: ctx.orc, supervisor: asAgent(ctx, 'supervisor'), fake: ctx.get('subagents') as FakeSubagents }
+  return { ctx, service: ctx.orc, supervisor: asAgent(ctx, 'supervisor'), fake: ctx.get('subagents') as unknown as FakeSubagents }
 }
 
 function textResult(text: string, stopReason: SubagentResult['stopReason'] = 'completed'): SubagentResult {
@@ -597,7 +597,11 @@ describe('Codex dispatch', () => {
     await settleTask(harness, TASK_A)
     const seen: { id: string; sourceStage?: string; file?: string }[] = []
     const fix: OrcFixWork = async (input) => {
-      seen.push(...input.findings.map(item => ({ id: item.id, sourceStage: item.sourceStage, file: item.file })))
+      seen.push(...input.findings.map(item => ({
+        id: item.id,
+        ...(item.sourceStage === undefined ? {} : { sourceStage: item.sourceStage }),
+        ...(item.file === undefined ? {} : { file: item.file }),
+      })))
       return { decision: 'fix bounds' }
     }
     harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [
@@ -736,7 +740,11 @@ describe('Codex dispatch', () => {
     await settleTask(harness, TASK_A)
     const seen: { scope?: string; sourceStage?: string; iteration: number }[] = []
     const fix: OrcFixWork = async (input) => {
-      seen.push(...input.findings.map(item => ({ scope: item.scope, sourceStage: item.sourceStage, iteration: input.iteration })))
+      seen.push(...input.findings.map(item => ({
+        ...(item.scope === undefined ? {} : { scope: item.scope }),
+        ...(item.sourceStage === undefined ? {} : { sourceStage: item.sourceStage }),
+        iteration: input.iteration,
+      })))
       return { decision: 'fix the branch finding' }
     }
     harness.fake.queue.push(Promise.resolve(reportResult('codex-review', [])))

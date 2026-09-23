@@ -1,6 +1,6 @@
 ---
 description: "从版本 1 的 orc 事件重放持久的 Supervisor、Lead 与 Peer 工作流。"
-kind: "package-library"
+kind: "package-reference"
 ---
 
 # @deepseek-ai/dsh-experimental-orc
@@ -55,7 +55,7 @@ Codex 启动被持久化之后，`settleCodexRun` 读取这次一次性运行的
 
 `./invariant` 伴随模块监听 `session/event`，并忽略 `orc/*` 以外的每个类型。它折叠已提交前缀，应用候选事件，并在投影拒绝时报告失败。检查发生在事件被追加之前。
 
-`OrcService` 注入 agents、sessions、session persistence、session projections 与 subagents。它注册 `orc` 投影并读回该投影。只有当日志行匹配 correlation、stage、role 与 task 时，结果才会被追加。Codex 请求事件在 `start` 返回后保存 `continuationId`，Lead 或 Peer 节点在 `startContinuable` 返回后保存 `messageId`。没有该句柄的未完成行会被记成阻断失败，并且不会被当作可恢复的子运行。工具与已发布的会话事件表留在本包之外。
+`OrcService` 注入 agents、sessions、session persistence、session projections 与 subagents。它注册 `orc` 投影并读回该投影。只有当日志行匹配 correlation、stage、role 与 task 时，结果才会被追加。Codex 请求事件在 `start` 返回后保存 `continuationId`，Lead 或 Peer 节点在 `startContinuable` 返回后保存 `messageId`。没有该句柄的未完成行会被记成阻断失败，并且不会被当作可恢复的子运行。面向模型的工具留在 `@deepseek-ai/dsh-experimental-tool-orc`。本包声明 `orc/*` 会话事件。
 
 </details>
 
@@ -65,7 +65,6 @@ Codex 启动被持久化之后，`settleCodexRun` 读取这次一次性运行的
 ## 延伸阅读
 
 - [实验性包](../README.zh.md) — 发布与依赖隔离。
-- [ORC 设计](../../../docs/superpowers/specs/2026-09-22-orc-superpowers-orchestration-design.md) — 必需的生命周期、角色与失败行为。
 
 -----
 
@@ -82,7 +81,7 @@ ORC 事件不进入 Supervisor 的派生历史。每个子提示属于独立会�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **只从活会话恢复** — `orc/*` 不属于已发布的 `SessionEventMap`。活会话接受这些事件。本构建的持久化读取会拒绝它们，因为它们没有标成 ignorable，所以恢复使用活的 Supervisor 日志，而不是冷启动重开。
+- **本构建可冷启动重开** — `orc/*` 属于本构建的会话词汇，`plan/review` 是批准事件。本构建的持久化读取接受包含它们的日志。早于这次登记的读取器会拒绝该日志，因为这些事件没有标成 ignorable。版本 1 的 `orc/spec/requested` 与 `orc/plan/requested` 要求 `contextRef`。投影恢复已记录的提示、技能包络、任务 id、Codex 文本和批准关联，而不读取子会话 transcript。仍打开的 Codex 行还需要启动它的那个进程里的结果 promise。
 - **同一父节点、角色与任务只保留一个未完成子节点** — 该子节点仍打开时，`spawn` 返回它，而不会为同一任务再创建一个 Peer。
 - **每次重开一个任务** — 一次前往 `task_fix` 的 `orc/phase` 只重开被点名的任务。`orc/fix/iteration` 在回到 review 之前记录这次修复。完成要等待下一次 `final_review` 访问中干净的分支一对结果。
 - **阈值下限** — 一次运行可以把 `low` 或 `info` 加入阻断集合，但不能省略 `critical`、`high` 或 `medium`。

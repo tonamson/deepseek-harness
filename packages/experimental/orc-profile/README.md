@@ -66,27 +66,23 @@ The runtime content is [`cordis.patch.yml`](cordis.patch.yml). It inserts the OR
 <a id="model-experience"></a>
 ## Model Experience
 
-### ORC routes
-
-#### What the model sees
-
-The persona and tool catalog belong to the agent preset and [`@deepseek-ai/dsh-experimental-tool-orc`](../tool-orc/README.md). This bundle only publishes the service config those tools read.
+Indirectly, through the agent preset and `@deepseek-ai/dsh-experimental-tool-orc`, which own the persona and tool catalog.
 
 #### KV Cache effect
 
 None from this package. Child prompts are separate sessions.
 
------
-
-<a id="known-limitations-and-deferred-work"></a>
 ## Known Limitations and Deferred Work
 
-Codex provider rows are not registered here. A profile without `codex-spec`, `codex-review`, and `codex-audit` cannot start those runs. The patch does not change a profile that has not added this bundle.
+<a id="known-limitations-and-deferred-work"></a>
+
+- **Codex providers are not in this bundle** — a profile without `codex-spec`, `codex-review`, and `codex-audit` cannot start those runs.
+- **The patch does not alter an existing profile** — a profile that has not added this bundle is unchanged.
 
 -----
 
 <a id="dev-note"></a>
-## Dev Note
+### Dev Note
 
 <details>
 <summary>Working context for maintainers — click to expand</summary>

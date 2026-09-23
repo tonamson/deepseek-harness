@@ -2,6 +2,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import InvariantService from '@deepseek-ai/dsh-invariants'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-plan-mode'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ContinuableStart, ContinuableStartSpec, SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
@@ -158,7 +159,7 @@ async function setup(config: OrcServiceConfig = CONFIG): Promise<Harness> {
   await ctx.plugin(InvariantService, { enabled: true })
   await ctx.plugin(OrcInvariant)
   const fiber = await ctx.plugin(OrcService, config)
-  return { ctx, service: ctx.orc, supervisor: asAgent(ctx, 'supervisor'), fake: ctx.get('subagents') as FakeSubagents, fiber }
+  return { ctx, service: ctx.orc, supervisor: asAgent(ctx, 'supervisor'), fake: ctx.get('subagents') as unknown as FakeSubagents, fiber }
 }
 
 function leadInput(taskId: ReturnType<typeof OrcTaskId> = TASK) {
@@ -181,7 +182,7 @@ function peerInput(taskId: ReturnType<typeof OrcTaskId> = TASK) {
 
 async function userReview(
   service: { planReviewSettled(): Promise<void> },
-  session: { append: (type: string, data: unknown) => unknown },
+  session: Session,
   decision: 'approved' | 'rejected' = 'approved',
 ): Promise<void> {
   session.append('plan/review', { version: 1, correlation: 'plan-review-1', decision })
@@ -250,7 +251,7 @@ describe('ORC service role tree', () => {
     await ctx.plugin(FakePersistence)
     await ctx.plugin(FakeSubagents)
     const { model: _model, ...codexSpec } = CONFIG.codexSpec
-    await expect(ctx.plugin(OrcService, { ...CONFIG, codexSpec })).rejects.toThrow(/invalid ORC config/)
+    await expect(ctx.plugin(OrcService, { ...CONFIG, codexSpec } as OrcServiceConfig)).rejects.toThrow(/invalid ORC config/)
   })
 
   it('refuses a hidden blocking threshold and records the configured route', async () => {
@@ -814,7 +815,7 @@ describe('ORC delegated results', () => {
   it('closes an open Codex row when phase append or flush fails and does not resume it', async () => {
     const flushed = await setup()
     await createRun(flushed)
-    const persistence = flushed.ctx.get('sessionPersistence') as FakePersistence
+    const persistence = flushed.ctx.get('sessionPersistence') as unknown as FakePersistence
     persistence.flushFailure = new Error('flush failed')
     await expect(flushed.service.startSpecPlan(flushed.supervisor, 'brainstorm-1', SIGNAL)).rejects.toThrow(/flush failed/)
     expect(flushed.service.state(flushed.supervisor).phase).toBe('spec_required')
@@ -1051,7 +1052,8 @@ describe('ORC resume and later gates', () => {
     expect(reviewShot?.request.outputSchema).toBeUndefined()
     expect(reviewShot?.request.maxDepth).toBeUndefined()
     expect(reviewShot?.request.agentOptions).toBeUndefined()
-    expect(harness.fake.oneShot.at(-1)?.request.prompt[0]?.text).toContain('review-only')
+    const prompt = harness.fake.oneShot.at(-1)?.request.prompt[0]
+    expect(prompt?.type === 'text' ? prompt.text : '').toContain('review-only')
     await harness.service.recordResult(harness.supervisor, {
       correlationId: review.correlationId,
       stage: 'codex-review',

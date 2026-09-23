@@ -41,6 +41,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
 | `@deepseek-ai/dsh-experimental-tool-agent-team` | `interrupt_agent`, `list_agents`, `send_message`, `spawn_teammate`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_update`, `wait_agent` | `ctx.tools`, `ctx.systemPrompt`, `ctx.agentTeams`, `an exact live Team member Agent` | `tool/call`, `team/member`, `team/message/queued`, `team/message/delivered`, `team/task`, `tool/result` | - | All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names. |
+| `@deepseek-ai/dsh-experimental-tool-orc` | `orc_advance`, `orc_assign_task`, `orc_create_workflow`, `orc_fail`, `orc_record_fix`, `orc_record_result`, `orc_request_audit`, `orc_request_review`, `orc_request_spec_plan`, `orc_run_final_gates`, `orc_run_task_gates`, `orc_settle_task`, `orc_spawn`, `orc_start_task` | `ctx.tools`, `ctx.systemPrompt`, `ctx.orc`, `a calling Agent` | `tool/call`, `tool/result`, `orc/workflow/created`, `orc/spec/requested`, `orc/plan/requested`, `orc/plan/approval`, `orc/node/created`, `orc/task/assigned`, `orc/review/requested`, `orc/audit/requested`, `orc/fix/iteration` | - | All ORC tools are scoped to the calling agent. The shipped profiles do not enable them. `@deepseek-ai/dsh-experimental-orc-profile` mounts the service and this package. `plan/review` is appended by plan mode, not by these tools. |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
@@ -2292,6 +2293,514 @@ Wait for the next teammate status, mailbox, or shared-task change after this cal
 Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/experimental/tool-agent-team/src/index.ts)
 
 All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names.
+
+<a id="deepseek-aidsh-experimental-tool-orc"></a>
+
+## `@deepseek-ai/dsh-experimental-tool-orc`
+
+### `orc_advance`
+
+Advance the workflow. A Peer cannot advance. A Lead cannot take a Supervisor edge or name another task.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "to": {
+      "type": "string",
+      "description": "Requested phase.",
+      "enum": [
+        "brainstorming",
+        "spec_required",
+        "plan_required",
+        "awaiting_user_approval",
+        "task_implementation",
+        "task_peer_settlement",
+        "task_review",
+        "task_audit",
+        "task_fix",
+        "next_task",
+        "final_review",
+        "complete",
+        "failed"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task id when the edge names one."
+    }
+  },
+  "required": [
+    "to"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_assign_task`
+
+Assign one implementation task. Only the Supervisor may call this.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Stable task id."
+    },
+    "write_scope": {
+      "type": "array",
+      "description": "Paths this task may write.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "description": "How this task is accepted."
+    }
+  },
+  "required": [
+    "task_id",
+    "write_scope",
+    "acceptance_criteria"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_create_workflow`
+
+Open the ORC workflow on this agent. Does not approve a plan or start implementation.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "responsibility": {
+      "type": "string",
+      "description": "Brainstorm or task context recorded in the Supervisor prompt."
+    },
+    "write_scope": {
+      "type": "array",
+      "description": "Repository paths the run may write.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "description": "How the run is accepted."
+    },
+    "reporting_format": {
+      "type": "string",
+      "description": "How children report results."
+    },
+    "blocking_severities": {
+      "type": "array",
+      "description": "Severities that block progress. The service rejects a set that omits critical, high, and medium.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "info"
+        ]
+      }
+    }
+  },
+  "required": [
+    "responsibility",
+    "write_scope",
+    "acceptance_criteria",
+    "reporting_format",
+    "blocking_severities"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_fail`
+
+Record terminal failure. Only the Supervisor actor is accepted by the service.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "reason": {
+      "type": "string",
+      "description": "Durable failure text."
+    }
+  },
+  "required": [
+    "reason"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_record_fix`
+
+Record the fix decision for the active task. A Peer cannot call this.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Task id."
+    },
+    "iteration": {
+      "type": "integer",
+      "description": "Next fix iteration."
+    },
+    "decision": {
+      "type": "string",
+      "description": "Fix decision text."
+    },
+    "assignee_node_id": {
+      "type": "string",
+      "description": "Optional node assigned the fix."
+    }
+  },
+  "required": [
+    "task_id",
+    "iteration",
+    "decision"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_record_result`
+
+Record a DeepSeek node result. A Peer may record only its own run. A Lead may record itself or its children. Codex results are not accepted.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "correlation_id": {
+      "type": "string",
+      "description": "Delegation correlation id."
+    },
+    "stage": {
+      "type": "string",
+      "description": "Delegated stage.",
+      "enum": [
+        "codex-spec",
+        "codex-plan",
+        "codex-review",
+        "codex-audit",
+        "deepseek-node"
+      ]
+    },
+    "delegation_role": {
+      "type": "string",
+      "description": "Role stored on the delegation."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task id when the delegation has one."
+    },
+    "status": {
+      "type": "string",
+      "description": "Codex report status.",
+      "enum": [
+        "ok",
+        "failed",
+        "malformed",
+        "unavailable"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "description": "Spec or plan text."
+    },
+    "outcome": {
+      "type": "string",
+      "description": "DeepSeek node outcome.",
+      "enum": [
+        "settled",
+        "failed",
+        "timeout",
+        "cancelled",
+        "incomplete"
+      ]
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Evidence for a node outcome."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Review or audit findings. Do not treat a missing result as an empty list.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "summary"
+        ]
+      }
+    }
+  },
+  "required": [
+    "correlation_id",
+    "stage",
+    "delegation_role"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_request_audit`
+
+Open a Codex audit. Audit does not include review. Only the Supervisor may call this.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "description": "Task review or final branch review.",
+      "enum": [
+        "task",
+        "branch"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Active task id. Omit for a branch run."
+    }
+  },
+  "required": [
+    "scope"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_request_review`
+
+Open a Codex review. Review does not include audit. Only the Supervisor may call this.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "description": "Task review or final branch review.",
+      "enum": [
+        "task",
+        "branch"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Active task id. Omit for a branch run."
+    }
+  },
+  "required": [
+    "scope"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_request_spec_plan`
+
+Start the next Codex spec or plan run. This is the only transition into spec_required or plan_required. Only the Supervisor may call this.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "context_ref": {
+      "type": "string",
+      "description": "Completed brainstorm or context reference. Prompt text cannot replace this argument."
+    }
+  },
+  "required": [
+    "context_ref"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_run_final_gates`
+
+Run branch review and branch audit. A blocking finding is sent to that task Lead. Only the Supervisor may call this.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_run_task_gates`
+
+Run task review, task audit, and the existing Lead fix until both gates are clean or one result blocks. Only the Supervisor may call this.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_settle_task`
+
+Record Lead settlement for the task.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Task id."
+    },
+    "lead_node_id": {
+      "type": "string",
+      "description": "Lead node id. A Lead caller may omit it. A Peer cannot name another Lead."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Settlement evidence."
+    }
+  },
+  "required": [
+    "task_id",
+    "evidence"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_spawn`
+
+Create one Lead or Peer for a task. The service allows only Supervisor to Lead and Lead to Peer.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "description": "Child role.",
+      "enum": [
+        "lead",
+        "peer"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task the child works on."
+    },
+    "responsibility": {
+      "type": "string",
+      "description": "Bounded responsibility recorded in the child prompt."
+    },
+    "write_scope": {
+      "type": "array",
+      "description": "Paths the child may write.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "string",
+      "description": "How the child is accepted."
+    },
+    "reporting_format": {
+      "type": "string",
+      "description": "How the child reports evidence."
+    }
+  },
+  "required": [
+    "role",
+    "task_id",
+    "responsibility",
+    "write_scope",
+    "acceptance_criteria",
+    "reporting_format"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+### `orc_start_task`
+
+Record that the named Lead started the task.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Task id."
+    },
+    "lead_node_id": {
+      "type": "string",
+      "description": "Lead node id. A Lead caller may omit it. A Peer cannot name another Lead."
+    }
+  },
+  "required": [
+    "task_id"
+  ]
+}
+```
+
+Source: [`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts)
+
+All ORC tools are scoped to the calling agent. The shipped profiles do not enable them. `@deepseek-ai/dsh-experimental-orc-profile` mounts the service and this package. `plan/review` is appended by plan mode, not by these tools.
 
 <a id="deepseek-aidsh-tool-todo"></a>
 

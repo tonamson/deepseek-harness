@@ -1,6 +1,6 @@
 ---
 description: "Replay a durable Supervisor, Lead, and Peer workflow from version-1 orc events."
-kind: "package-library"
+kind: "package-reference"
 ---
 
 # @deepseek-ai/dsh-experimental-orc
@@ -55,7 +55,7 @@ Event names and payload version stay at version 1. This package does not migrate
 
 The `./invariant` companion listens for `session/event` and ignores every type outside `orc/*`. It folds the committed prefix, applies the candidate, and reports a failure when the projection refuses it. The check runs before the event is appended.
 
-`OrcService` injects agents, sessions, session persistence, session projections, and subagents. It registers an `orc` projection and reads that projection back. A result appends only when the log row matches the correlation, stage, role, and task. Codex request events store `continuationId` after `start` returns, and a Lead or Peer node stores `messageId` after `startContinuable` returns. An open row without that handle is closed as a blocking failure and is not resumed. Tools and the released session event map stay outside this package.
+`OrcService` injects agents, sessions, session persistence, session projections, and subagents. It registers an `orc` projection and reads that projection back. A result appends only when the log row matches the correlation, stage, role, and task. Codex request events store `continuationId` after `start` returns, and a Lead or Peer node stores `messageId` after `startContinuable` returns. An open row without that handle is closed as a blocking failure and is not resumed. Model-facing tools stay in `@deepseek-ai/dsh-experimental-tool-orc`. This package declares the `orc/*` session events.
 
 </details>
 
@@ -65,7 +65,6 @@ The `./invariant` companion listens for `session/event` and ignores every type o
 ## Further Exploration
 
 - [Experimental packages](../README.md) — publication and dependency isolation.
-- [ORC design](../../../docs/superpowers/specs/2026-09-22-orc-superpowers-orchestration-design.md) — required lifecycle, roles, and failure behavior.
 
 -----
 
@@ -82,7 +81,7 @@ ORC events stay off the Supervisor derived history. Each child prompt is a separ
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Live resume only** — `orc/*` is not part of the released `SessionEventMap`. The live session accepts the events. A persistence reader in this build refuses them because they are not ignorable, so recovery uses the live Supervisor log rather than a cold reopen.
+- **Cold reopen in this build** — `orc/*` is part of this build's session vocabulary, and `plan/review` is the approval event. A persistence reader in this build accepts a log that contains them. A reader that predates the registration refuses that log because the events are not ignorable. Version-1 `orc/spec/requested` and `orc/plan/requested` require `contextRef`. The projection restores recorded prompts, skill envelopes, task ids, Codex text, and the approval correlation without reading child transcripts. An open Codex row still needs the result promise from the process that started it.
 - **One open child per parent, role, and task** — while that child is open, `spawn` returns it instead of creating another peer for the same task.
 - **One task per reopen** — one `orc/phase` to `task_fix` reopens only the named task. `orc/fix/iteration` records that fix before review. Completion waits for the next final-review visit's clean branch pair.
 - **Threshold floor** — a run can add `low` or `info` to the blocking set, and it cannot omit `critical`, `high`, or `medium`.

@@ -99,11 +99,18 @@ Each agent gets one `orc:role` section. The text states `role`, `parent`, `autho
 ##### Role section
 
 ```markdown
+DeepSeek ORC worker follows the role section below.
+
 role: peer
+
 parent: lead-1
+
 authority: may perform the assigned responsibility and report evidence; may not create children, invoke Codex, approve a plan, skip review or audit, or advance the workflow
+
 phase: task_implementation
+
 task: task-a
+
 mandatory Superpowers skills: test-driven-development, verification-before-completion
 ```
 

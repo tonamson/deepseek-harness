@@ -128,6 +128,12 @@ afterEach(async () => {
   }))
 })
 
+function requiredScope(ctx: Parameters<typeof scopeOf>[0]): NonNullable<ReturnType<typeof scopeOf>> {
+  const scope = scopeOf(ctx)
+  if (scope === undefined) throw new Error('scope is required')
+  return scope
+}
+
 async function publishAgent(ctx: Context, id: string): Promise<Agent> {
   let agent!: Agent
   await ctx.plugin(Object.assign(async (inner: Context) => {
@@ -149,7 +155,7 @@ async function setup(): Promise<Harness> {
   await ctx.plugin(OrcService, CONFIG)
   await ctx.plugin(toolOrc)
   const supervisor = await publishAgent(ctx, 'supervisor')
-  return { ctx, supervisor, orc: ctx.orc, fake: ctx.get('subagents') as FakeSubagents }
+  return { ctx, supervisor, orc: ctx.orc, fake: ctx.get('subagents') as unknown as FakeSubagents }
 }
 
 function execute(ctx: Context, agent: Agent | undefined, name: string, args: unknown) {
@@ -279,11 +285,11 @@ describe('dsh-tool-orc', () => {
     const peerLaunch = await harness.orc.spawn(lead, peerInput())
     const peer = await publishLaunch(harness.ctx, peerLaunch)
 
-    const supervisorTools = (await harness.ctx.systemPrompt.assemble({ scope: scopeOf(harness.supervisor.ctx) }))
+    const supervisorTools = (await harness.ctx.systemPrompt.assemble({ scope: requiredScope(harness.supervisor.ctx) }))
       .tools.map(tool => tool.name).filter(name => TOOL_NAMES.includes(name)).sort()
-    const leadTools = (await harness.ctx.systemPrompt.assemble({ scope: scopeOf(lead.ctx) }))
+    const leadTools = (await harness.ctx.systemPrompt.assemble({ scope: requiredScope(lead.ctx) }))
       .tools.map(tool => tool.name).filter(name => TOOL_NAMES.includes(name)).sort()
-    const peerTools = (await harness.ctx.systemPrompt.assemble({ scope: scopeOf(peer.ctx) }))
+    const peerTools = (await harness.ctx.systemPrompt.assemble({ scope: requiredScope(peer.ctx) }))
       .tools.map(tool => tool.name).filter(name => TOOL_NAMES.includes(name)).sort()
     expect(supervisorTools).toEqual(TOOL_NAMES)
     expect(leadTools).toEqual(TOOL_NAMES)

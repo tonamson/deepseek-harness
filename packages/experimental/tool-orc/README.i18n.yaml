@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/tool-orc/README.md
-README.md: b7614805baf69b54d099a660284bde7b8b6ed093
-README.zh.md: 6039c0a6ddc114045a7a6bcbd919c8315d63791b
+README.md: fd1644cdd625125bb20487c0a67cca5a96734d5b
+README.zh.md: 29d5e956291bfb6f220e7a3c1e1474df8dba3712

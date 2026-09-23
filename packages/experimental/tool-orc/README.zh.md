@@ -7,7 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 本包让模型通过一份稳定的工具目录打开并推进 Supervisor、Lead 与 Peer 工作流。每个角色收到同一套 schema。调用是否成立由 `OrcService` 决定。当显式的 ORC profile 要把 spec 与 plan 交给 Codex、把实现交给 DeepSeek 子运行时选用它。本包是实验性的，没有稳定性承诺。
 
@@ -99,11 +99,18 @@ kind: "package-reference"
 ##### 角色段落
 
 ```markdown
+DeepSeek ORC worker follows the role section below.
+
 role: peer
+
 parent: lead-1
+
 authority: may perform the assigned responsibility and report evidence; may not create children, invoke Codex, approve a plan, skip review or audit, or advance the workflow
+
 phase: task_implementation
+
 task: task-a
+
 mandatory Superpowers skills: test-driven-development, verification-before-completion
 ```
 

@@ -636,7 +636,7 @@ describe('ORC transition gates', () => {
     expect(failure([
       workflow(),
       specRequested(),
-      { type: 'orc/phase', data: { version: 1, runId: RUN, to: 'spec_required' } },
+      { type: 'orc/phase', data: { version: 1, runId: RUN, to: 'spec_required' } } as OrcEvent,
     ])).toMatch(/phase actor is required/)
   })
 
@@ -970,7 +970,7 @@ describe('ORC transition gates', () => {
     expect(failure([...ready, runCompleted(PEER_A)])).toMatch(/peer cannot advance the workflow/)
     expect(failure([
       ...ready,
-      { type: 'orc/run/completed', data: { version: 1, runId: RUN } },
+      { type: 'orc/run/completed', data: { version: 1, runId: RUN } } as OrcEvent,
     ])).toMatch(/run actor is required/)
     expect(failure([...eventsThroughPeer(), runFailed('disposed', LEAD_A)])).toMatch(/lead cannot fail the run/)
     expect(failure([...eventsThroughPeer(), runFailed('disposed', PEER_A)])).toMatch(/peer cannot advance the workflow/)

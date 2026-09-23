@@ -28,6 +28,7 @@ import {
   normalizedSystemPrompts,
   normalizedToolSchemas,
   parseSnapshotManifest,
+  parseSystemPromptSnapshot,
   parseToolSchemasSnapshot,
   redactSessionSnapshotIds,
   refreshFixtureReplacements,
@@ -744,14 +745,24 @@ async function verifyHeaders(scenario: HeadlessScenario, actualLogs: readonly Se
   for (const [logIndex, log] of actualLogs.entries()) {
     const headers = normalizedHeaders(log.content, ctx)
     const prompts = normalizedSystemPrompts(log.content, ctx)
+    const childPrompt = childPrompts.get(logIndex)
+    const declaredPromptChanges = logIndex === 0
+      ? pin.manifest.header.promptChanges ?? 0
+      : childPrompt === undefined ? 0 : parseSystemPromptSnapshot(childPrompt).changes.length
     if (headers.length > 0) {
       expect(systemPromptPrecedesRequests(log.content), `${scenario.name}: a system/message precedes the first request/header`).toBe(true)
       expect(prompts.length, `${scenario.name}: system/message count`)
-        .toBe(1 + (logIndex === 0 ? pin.manifest.header.promptChanges ?? 0 : 0))
+        .toBe(1 + declaredPromptChanges)
     }
+    const childFixture = childSchemas.has(logIndex)
+      ? await readFile(join(scenario.dir, sessionFixtureNames(await readdir(scenario.dir))[logIndex] as string), 'utf8')
+      : undefined
+    const childHeaderBases = childFixture === undefined
+      ? undefined
+      : normalizedHeaders(childFixture, fixtureContext(childFixture))
     for (const [index, header] of headers.entries()) {
       const selectedSchemas = childSchemas.get(logIndex)?.[index]
-      const base = reconstructed[index] ?? reconstructed[0]
+      const base = childHeaderBases?.[index] ?? reconstructed[index] ?? reconstructed[0]
       const expected = selectedSchemas === undefined ? base : { ...base as JsonObject, tools: selectedSchemas }
       expect(header, `${scenario.name}: request header ${index + 1}`).toEqual(expected)
     }
@@ -1051,6 +1062,7 @@ describe('headless recorded-session snapshots', () => {
           tempDirPrefix: 'dsh-log-snap-',
           ...(scenario.manifest.workspace?.parent === 'outside-temp' ? { tempDirParent: outsideTempWorkspaceParent() } : {}),
           binScript: dshBin,
+          ...(scenario.name === 'orc-superpowers' ? { processTimeoutMs: 90_000 } : {}),
           configPath: join(baseComposition.dir, 'cordis.yml'),
           binArgs: [
             '--profile', 'headless',
@@ -1194,6 +1206,8 @@ describe('headless recorded-session snapshots', () => {
       } else {
         expect(finalWorkspace, `${scenario.name}: a changed workspace requires workspace.final`).toEqual(initialWorkspace)
       }
-    }, scenario.name === 'provider-cwd' ? 3 * LOADER_SMOKE_TEST_TIMEOUT_MS : LOADER_SMOKE_TEST_TIMEOUT_MS)
+    }, scenario.name === 'provider-cwd' ? 3 * LOADER_SMOKE_TEST_TIMEOUT_MS
+      : scenario.name === 'orc-superpowers' ? 120_000
+        : LOADER_SMOKE_TEST_TIMEOUT_MS)
   }
 })

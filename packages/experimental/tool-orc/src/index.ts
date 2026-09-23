@@ -146,7 +146,7 @@ function superpowersWorkflow(role: OrcRole): string {
     'Superpowers workflow requirements: use the mounted Superpowers skill catalog.',
     `skillCatalog: ${SUPERPOWERS_SKILL_CATALOG.join(', ')}`,
     `mandatory Superpowers skills: ${MANDATORY_SKILLS[role].join(', ')}`,
-  ].join('\n')
+  ].join('\n\n')
 }
 
 /**
@@ -157,13 +157,14 @@ function superpowersWorkflow(role: OrcRole): string {
 export function renderRoleSection(input: OrcRoleSectionInput): string {
   const mandatory = input.role === 'unassigned' ? 'none' : MANDATORY_SKILLS[input.role].join(', ')
   return [
+    'DeepSeek ORC worker follows the role section below.',
     `role: ${input.role}`,
     `parent: ${input.parentId ?? 'none'}`,
     `authority: ${authorityOf(input.role)}`,
     `phase: ${input.phase ?? 'none'}`,
     `task: ${input.taskId ?? 'none'}`,
     `mandatory Superpowers skills: ${mandatory}`,
-  ].join('\n')
+  ].join('\n\n')
 }
 
 /**
@@ -311,7 +312,7 @@ function install(agent: Agent, ctx: Context): () => void {
           }),
           workflow,
           ...(logged !== undefined && logged !== workflow ? [logged] : []),
-        ].join('\n')
+        ].join('\n\n')
       },
     }))
 

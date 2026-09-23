@@ -63,6 +63,8 @@ import BrowserUseRegistry from '@deepseek-ai/dsh-browser-use'
 import * as StagehandBrowserTools from '@deepseek-ai/dsh-experimental-browser-use-stagehand-native'
 import type TeamService from '@deepseek-ai/dsh-experimental-agent-team'
 import * as ToolTeam from '@deepseek-ai/dsh-experimental-tool-agent-team'
+import OrcService from '@deepseek-ai/dsh-experimental-orc'
+import * as ToolOrc from '@deepseek-ai/dsh-experimental-tool-orc'
 import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
 import type PluginManager from '@deepseek-ai/dsh-plugin-manager'
 import * as PluginManagerTools from '@deepseek-ai/dsh-plugin-manager/tools'
@@ -611,6 +613,61 @@ const TOOL_PACKAGES: ToolPackage[] = [
     scope: ctx => catalogChildScopes.get(ctx) as Agent,
     note:
       'All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-experimental-tool-orc',
+    dir: 'tool-orc',
+    source: 'packages/experimental/tool-orc/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.orc', 'a calling Agent'],
+    writes: [
+      'tool/call',
+      'tool/result',
+      'orc/workflow/created',
+      'orc/spec/requested',
+      'orc/plan/requested',
+      'orc/plan/approval',
+      'orc/node/created',
+      'orc/task/assigned',
+      'orc/review/requested',
+      'orc/audit/requested',
+      'orc/fix/iteration',
+    ],
+    async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(SessionStore)
+      ctx.provide('sessionPersistence', { async flush() {} })
+      ctx.provide('subagents', {})
+      await ctx.plugin(OrcService, {
+        deepseek: { subagentProvider: 'spawn', provider: 'deepseek-official', model: 'deepseek-flash', effort: 'high' },
+        codexSpec: { subagentProvider: 'codex-spec', provider: 'codex-spec', model: 'gpt-5.6-terra', effort: 'high' },
+        codexPlan: { subagentProvider: 'codex-spec', provider: 'codex-spec', model: 'gpt-5.6-terra', effort: 'high' },
+        codexReview: { subagentProvider: 'codex-review', provider: 'codex-review', model: 'gpt-5.6-luna', effort: 'high' },
+        codexAudit: { subagentProvider: 'codex-audit', provider: 'codex-audit', model: 'gpt-5.6-luna', effort: 'xhigh' },
+        repositoryPath: '.',
+        skillRequirements: 'superpowers workflow',
+        specOutputSchema: 'codex-spec',
+        planOutputSchema: 'codex-plan',
+        reviewOutputSchema: 'codex-review',
+        auditOutputSchema: 'codex-audit',
+      })
+      const session = ctx.sessions.create(SessionId('tool-catalog-orc'))
+      let agent!: Agent
+      await ctx.plugin(Object.assign(async (inner: Context) => {
+        agent = {
+          id: session.id,
+          session,
+          options: {},
+          status: 'idle',
+        } as unknown as Agent
+        Object.assign(agent, { ctx: createScope(inner, agent).ctx })
+        await inner.agents.register(agent)
+      }, { inject: ['tools', 'systemPrompt', 'agents', 'orc'] }))
+      await ctx.plugin(ToolOrc)
+      catalogChildScopes.set(ctx, agent)
+    },
+    scope: ctx => catalogChildScopes.get(ctx) as Agent,
+    note:
+      'All ORC tools are scoped to the calling agent. The shipped profiles do not enable them. `@deepseek-ai/dsh-experimental-orc-profile` mounts the service and this package. `plan/review` is appended by plan mode, not by these tools.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-todo',

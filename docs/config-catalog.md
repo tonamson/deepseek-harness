@@ -759,6 +759,21 @@ export interface InspectorOptions {
 
 Source: [`packages/experimental/inspector/src/index.ts:66`](../packages/experimental/inspector/src/index.ts)
 
+<a id="deepseek-aidsh-experimental-orc"></a>
+
+## `@deepseek-ai/dsh-experimental-orc`
+
+Requires: `agents` · `sessions` · `sessionPersistence` · `sessionProjections` · `subagents`
+
+```ts config-catalog
+/** Validated deployment routes. Execution copies these fields and does not invent models. */
+export type OrcServiceConfig = z.infer<typeof configSchema>
+```
+
+Depends on: `z` (`zod`)
+
+Source: [`packages/experimental/orc/src/index.ts:101`](../packages/experimental/orc/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-ptc-runtime-python"></a>
 
 ## `@deepseek-ai/dsh-experimental-ptc-runtime-python`
@@ -1880,7 +1895,7 @@ export interface PlanModeConfig {
 }
 ```
 
-Source: [`packages/plan/plan-mode/src/index.ts:64`](../packages/plan/plan-mode/src/index.ts)
+Source: [`packages/plan/plan-mode/src/index.ts:75`](../packages/plan/plan-mode/src/index.ts)
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -3878,6 +3893,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-experimental-auto-review` — requires `llm` · `permissionPresets` · `sessions` · `tools` ([`packages/experimental/auto-review/src/index.ts`](../packages/experimental/auto-review/src/index.ts))
 - `@deepseek-ai/dsh-experimental-client-ui-agent-team` ([`packages/experimental/client-ui-agent-team/src/index.ts`](../packages/experimental/client-ui-agent-team/src/index.ts))
 - `@deepseek-ai/dsh-experimental-computer-use-cua-driver-native` — requires `computerUse` · `tools` · `systemPrompt` ([`packages/experimental/computer-use-cua-driver-native/src/index.ts`](../packages/experimental/computer-use-cua-driver-native/src/index.ts))
+- `@deepseek-ai/dsh-experimental-tool-orc` — requires `agents` · `orc` · `tools` · `systemPrompt` ([`packages/experimental/tool-orc/src/index.ts`](../packages/experimental/tool-orc/src/index.ts))
 - `@deepseek-ai/dsh-fs-observation-policy` ([`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts))
 - `@deepseek-ai/dsh-fs-ssh` — requires `ssh` · `sandboxPolicy` ([`packages/ssh/fs-ssh/src/index.ts`](../packages/ssh/fs-ssh/src/index.ts))
 - `@deepseek-ai/dsh-goal-round-driver` — requires `agents` · `goals` · `sessions` ([`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts))
@@ -3950,6 +3966,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-experimental-agent-team-profile` ([`packages/experimental/agent-team-profile/src/index.ts`](../packages/experimental/agent-team-profile/src/index.ts))
 - `@deepseek-ai/dsh-experimental-agent-team-web-profile` ([`packages/experimental/agent-team-web-profile/src/index.ts`](../packages/experimental/agent-team-web-profile/src/index.ts))
 - `@deepseek-ai/dsh-experimental-browser-use-runtime` ([`packages/experimental/browser-use-runtime/src/index.ts`](../packages/experimental/browser-use-runtime/src/index.ts))
+- `@deepseek-ai/dsh-experimental-orc-profile` ([`packages/experimental/orc-profile/src/index.ts`](../packages/experimental/orc-profile/src/index.ts))
 - `@deepseek-ai/dsh-experimental-webworker-packer` ([`packages/experimental/webworker-packer/src/index.ts`](../packages/experimental/webworker-packer/src/index.ts))
 - `@deepseek-ai/dsh-experimental-webworker-runtime` ([`packages/experimental/webworker-runtime/src/index.ts`](../packages/experimental/webworker-runtime/src/index.ts))
 - `@deepseek-ai/dsh-home-paths` ([`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts))
